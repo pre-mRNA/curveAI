@@ -1,0 +1,44 @@
+# Agent Log
+
+## Active Build Plan
+
+### Platform Summary
+
+- Build a greenfield platform with four surfaces: ElevenLabs/Twilio phone agents, an AWS Sydney control plane plus lightweight CRM, a native SwiftUI staff iOS app, and an internal web ops console.
+- Each staff member gets a dedicated Twilio number, dedicated ElevenLabs agent, personal cloned voice, Outlook calendar connection, pricing profile, and experiment assignments.
+- Core v1 actions: answer calls broadly with guardrails, give indicative or guardrailed dynamic quotes, book Outlook appointments, text secure photo-upload links, create callback tasks, summarize jobs for tradies, and end calls cleanly with ElevenLabs `end_call`.
+
+### Implementation Summary
+
+- Backend: TypeScript API plus worker-friendly service boundaries, Postgres-ready CRM model, local disk fallbacks for uploads, and n8n reserved for secondary automations.
+- Voice: ElevenLabs + Twilio per-staff agents with webhook-driven context, quote tools, booking tools, photo-link tools, callback tools, and post-call ingestion.
+- Staff onboarding: invite + OTP, voice-clone consent, pricing interview upload, Outlook connect, and staff-specific routing data.
+- Pricing: base pricebook plus personalized staff pricing profiles, experiment bands, floors, ceilings, audit trails, and accepted-price tracking.
+- Surfaces: internal web ops console, customer upload page, and native SwiftUI staff app with card-style job summaries.
+
+### Defaults Chosen
+
+- Launch region: Australia
+- Inbound routing: per-staff number
+- Staff app auth: invite + OTP
+- Calendar model: per-staff Outlook calendars
+- Upload mode: SMS signed link
+- Escalation default: callback-first, with transfer-to-human behind a feature flag
+- Data retention: transcripts and audio retained with explicit consent controls
+
+## Progress Log
+
+- Bootstrapped root workspace, shared contracts, and persistent plan docs.
+- API, web, and iOS scaffolds are being built in parallel by delegated workers.
+- Integrated the worker outputs into a single npm-workspaces repo with shared run scripts and a local secrets example.
+- Added a buildable Express API scaffold with seeded dashboard data, dynamic-price variants, staff onboarding routes, photo-link generation, upload aliases, and job-card retrieval.
+- Added a buildable Vite web console with card-style job summaries, pricing experiment views, and a public upload page that posts multipart photos to the API.
+- Added a valid SwiftUI/Xcode iOS scaffold for invite + OTP onboarding, Outlook connection, voice-consent capture, and tradie job cards.
+- Verified `npm run typecheck`, `npm run build`, `GET /health`, `GET /dashboard`, `xcodebuild -list`, and the upload flow from generated link to updated dashboard state.
+- Upgraded the web toolchain to Vite 8 so `npm audit` is clean across the workspace.
+- Hardened the API with request validation, persisted CRM snapshots, and a Node test suite covering production redaction, restart persistence, upload rejection, and request-shape validation.
+- Added admin auth for internal routes, HMAC signing for `/voice/*`, staff session issuance, `/staff/me`, and a staff-authenticated `/jobs` queue for the iOS app.
+- Made OTP verification invite-code-bound, time-limited, and lockable after repeated failures instead of leaving a public infinite-guess path.
+- Switched the web console admin token from local storage to session storage and aligned the upload UI with the backend image allowlist.
+- Aligned the iOS live client with the real API contract so invite-code verification, calendar connect, consent submission, and job fetches target existing backend routes.
+- Added a persistent local Kanban board in `docs/mvp-board.md` to track MVP progress and review debt between sessions.

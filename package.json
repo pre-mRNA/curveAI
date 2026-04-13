@@ -1,0 +1,19 @@
+{
+  "name": "curve-ai",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:api": "npm run dev -w @curve-ai/api",
+    "dev:web": "npm run dev -w @curve-ai/web",
+    "test:api": "npm run test -w @curve-ai/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

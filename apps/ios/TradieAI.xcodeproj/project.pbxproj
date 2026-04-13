@@ -1,0 +1,414 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		7B4F5C3F2D5B4C2A9F000001 /* TradieAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000011 /* TradieAIApp.swift */; };
+		7B4F5C3F2D5B4C2A9F000002 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000012 /* AppShellView.swift */; };
+		7B4F5C3F2D5B4C2A9F000003 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000013 /* Models.swift */; };
+		7B4F5C3F2D5B4C2A9F000004 /* OnboardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000014 /* OnboardingViews.swift */; };
+		7B4F5C3F2D5B4C2A9F000005 /* JobCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000015 /* JobCardView.swift */; };
+		7B4F5C3F2D5B4C2A9F000006 /* TradieAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000016 /* TradieAPIClient.swift */; };
+		7B4F5C3F2D5B4C2A9F000007 /* OnboardingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000017 /* OnboardingStore.swift */; };
+		7B4F5C3F2D5B4C2A9F000008 /* OnboardingFlowStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4F5C3F2D5B4C2A9F000018 /* OnboardingFlowStoreTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		7B4F5C3F2D5B4C2A9F000011 /* TradieAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradieAIApp.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000012 /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000013 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000014 /* OnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViews.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000015 /* JobCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobCardView.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000016 /* TradieAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradieAPIClient.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000017 /* OnboardingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStore.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000018 /* OnboardingFlowStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowStoreTests.swift; sourceTree = "<group>"; };
+		7B4F5C3F2D5B4C2A9F000021 /* TradieAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = TradieAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7B4F5C3F2D5B4C2A9F000022 /* TradieAITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TradieAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7B4F5C3F2D5B4C2A9F000031 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = text.markdown; path = README.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7B4F5C3F2D5B4C2A9F000041 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7B4F5C3F2D5B4C2A9F000045 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		7B4F5C3F2D5B4C2A9F000093 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7B4F5C3F2D5B4C2A9F000101 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7B4F5C3F2D5B4C2A9F000081;
+			remoteInfo = TradieAI;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		7B4F5C3F2D5B4C2A9F000092 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7B4F5C3F2D5B4C2A9F000081 /* TradieAI */;
+			targetProxy = 7B4F5C3F2D5B4C2A9F000093 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXGroup section */
+		7B4F5C3F2D5B4C2A9F000051 = {
+			isa = PBXGroup;
+			children = (
+				7B4F5C3F2D5B4C2A9F000061 /* TradieAI */,
+				7B4F5C3F2D5B4C2A9F000072 /* TradieAITests */,
+				7B4F5C3F2D5B4C2A9F000031 /* README.md */,
+				7B4F5C3F2D5B4C2A9F000071 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7B4F5C3F2D5B4C2A9F000061 /* TradieAI */ = {
+			isa = PBXGroup;
+			children = (
+				7B4F5C3F2D5B4C2A9F000011 /* TradieAIApp.swift */,
+				7B4F5C3F2D5B4C2A9F000012 /* AppShellView.swift */,
+				7B4F5C3F2D5B4C2A9F000013 /* Models.swift */,
+				7B4F5C3F2D5B4C2A9F000014 /* OnboardingViews.swift */,
+				7B4F5C3F2D5B4C2A9F000015 /* JobCardView.swift */,
+				7B4F5C3F2D5B4C2A9F000016 /* TradieAPIClient.swift */,
+				7B4F5C3F2D5B4C2A9F000017 /* OnboardingStore.swift */,
+			);
+			path = TradieAI;
+			sourceTree = "<group>";
+		};
+		7B4F5C3F2D5B4C2A9F000072 /* TradieAITests */ = {
+			isa = PBXGroup;
+			children = (
+				7B4F5C3F2D5B4C2A9F000018 /* OnboardingFlowStoreTests.swift */,
+			);
+			path = TradieAITests;
+			sourceTree = "<group>";
+		};
+		7B4F5C3F2D5B4C2A9F000071 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7B4F5C3F2D5B4C2A9F000021 /* TradieAI.app */,
+				7B4F5C3F2D5B4C2A9F000022 /* TradieAITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7B4F5C3F2D5B4C2A9F000081 /* TradieAI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7B4F5C3F2D5B4C2A9F000091 /* Build configuration list for PBXNativeTarget "TradieAI" */;
+			buildPhases = (
+				7B4F5C3F2D5B4C2A9F000041 /* Frameworks */,
+				7B4F5C3F2D5B4C2A9F000042 /* Sources */,
+				7B4F5C3F2D5B4C2A9F000043 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TradieAI;
+			productName = TradieAI;
+			productReference = 7B4F5C3F2D5B4C2A9F000021 /* TradieAI.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7B4F5C3F2D5B4C2A9F000082 /* TradieAITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7B4F5C3F2D5B4C2A9F000135 /* Build configuration list for PBXNativeTarget "TradieAITests" */;
+			buildPhases = (
+				7B4F5C3F2D5B4C2A9F000045 /* Frameworks */,
+				7B4F5C3F2D5B4C2A9F000044 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7B4F5C3F2D5B4C2A9F000092 /* PBXTargetDependency */,
+			);
+			name = TradieAITests;
+			productName = TradieAITests;
+			productReference = 7B4F5C3F2D5B4C2A9F000022 /* TradieAITests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7B4F5C3F2D5B4C2A9F000101 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					7B4F5C3F2D5B4C2A9F000081 = {
+						LastSwiftMigration = 1500;
+					};
+					7B4F5C3F2D5B4C2A9F000082 = {
+						LastSwiftMigration = 1500;
+					};
+				};
+			};
+			buildConfigurationList = 7B4F5C3F2D5B4C2A9F000111 /* Build configuration list for PBXProject "TradieAI" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 7B4F5C3F2D5B4C2A9F000051;
+			productRefGroup = 7B4F5C3F2D5B4C2A9F000071 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7B4F5C3F2D5B4C2A9F000081 /* TradieAI */,
+				7B4F5C3F2D5B4C2A9F000082 /* TradieAITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7B4F5C3F2D5B4C2A9F000043 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7B4F5C3F2D5B4C2A9F000042 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B4F5C3F2D5B4C2A9F000001 /* TradieAIApp.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000002 /* AppShellView.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000003 /* Models.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000004 /* OnboardingViews.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000005 /* JobCardView.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000006 /* TradieAPIClient.swift in Sources */,
+				7B4F5C3F2D5B4C2A9F000007 /* OnboardingStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7B4F5C3F2D5B4C2A9F000044 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B4F5C3F2D5B4C2A9F000008 /* OnboardingFlowStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7B4F5C3F2D5B4C2A9F000121 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = TradieAI;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7B4F5C3F2D5B4C2A9F000122 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = TradieAI;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7B4F5C3F2D5B4C2A9F000131 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOLS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = TradieAI;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7B4F5C3F2D5B4C2A9F000132 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOLS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = TradieAI;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7B4F5C3F2D5B4C2A9F000133 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TradieAI.app/TradieAI";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+			};
+			name = Debug;
+		};
+		7B4F5C3F2D5B4C2A9F000134 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curveai.tradieai.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TradieAI.app/TradieAI";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7B4F5C3F2D5B4C2A9F000091 /* Build configuration list for PBXNativeTarget "TradieAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7B4F5C3F2D5B4C2A9F000131 /* Debug */,
+				7B4F5C3F2D5B4C2A9F000132 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7B4F5C3F2D5B4C2A9F000135 /* Build configuration list for PBXNativeTarget "TradieAITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7B4F5C3F2D5B4C2A9F000133 /* Debug */,
+				7B4F5C3F2D5B4C2A9F000134 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7B4F5C3F2D5B4C2A9F000111 /* Build configuration list for PBXProject "TradieAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7B4F5C3F2D5B4C2A9F000121 /* Debug */,
+				7B4F5C3F2D5B4C2A9F000122 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 7B4F5C3F2D5B4C2A9F000101 /* Project object */;
+}

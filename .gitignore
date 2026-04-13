@@ -1,0 +1,25 @@
+node_modules
+dist
+build
+.DS_Store
+.vite
+coverage
+*.log
+*.tsbuildinfo
+
+# Local secrets
+secrets
+secrets.local.env
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+data/
+tmp/
+uploads/
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
