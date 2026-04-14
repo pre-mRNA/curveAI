@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { apiClient, ApiError } from './api/client';
 import { clearAdminToken, readAdminToken, saveAdminToken } from './lib/adminToken';
 import { PHOTO_UPLOAD_ACCEPT, isSupportedPhotoFile } from './lib/upload';
+import OnboardingPage from './onboarding/OnboardingPage';
 import type { DashboardPayload, JobSummary } from './types';
 
 function statusTone(status: JobSummary['status']) {
@@ -482,6 +483,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<InternalDashboard />} />
+      <Route path="/onboard/:inviteCode" element={<OnboardingPage />} />
       <Route path="/upload/:token" element={<UploadPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

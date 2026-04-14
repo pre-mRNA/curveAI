@@ -8,10 +8,10 @@ The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
 
 ## Workspace
 
-- `apps/api`: voice-control API, lightweight CRM backend, uploads, and staff onboarding endpoints
-- `apps/web`: internal ops console and customer photo upload flow
+- `apps/api`: voice-control API, lightweight CRM backend, uploads, browser onboarding endpoints, and portable provider adapters
+- `apps/web`: internal ops console, browser staff onboarding, and customer photo upload flow
 - `apps/ios`: native SwiftUI staff app
-- `packages/shared`: shared domain models and pricing logic
+- `packages/shared`: shared domain models, onboarding contracts, and pricing logic
 - `docs/mvp-board.md`: local Kanban board for active MVP work
 
 ## Run
@@ -28,8 +28,16 @@ The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
 
 - Internal ops routes use an admin bearer token or `X-Admin-Token`.
 - `/voice/*` automation routes require an HMAC signature using `AUTOMATION_SHARED_SECRET` over `timestamp.rawBody`.
-- Staff onboarding uses invite code + OTP, then mints a short-lived staff session token for iOS requests.
+- Browser onboarding uses an invite code to mint a session-specific onboarding token, then requires explicit recording and clone consent before issuing a realtime voice session.
+- Browser onboarding cannot finalize until calendar connect and a real audio voice sample are both present.
+- Staff app auth still uses invite + OTP, then mints a short-lived staff session token for iOS requests.
 - Customer photo uploads use opaque upload tokens and are rejected before file writes if the token is missing or expired.
+
+## Onboarding
+
+- `/onboard/:inviteCode` is the first real onboarding surface.
+- The browser flow runs consent -> interview -> extraction review -> Microsoft calendar connect -> clean voice sample -> finalize.
+- API reasoning, realtime voice, calendar, and clone behavior sit behind provider interfaces so the control plane can move toward self-hosted Australian infrastructure later without rewriting the product flow.
 
 ## Verification
 

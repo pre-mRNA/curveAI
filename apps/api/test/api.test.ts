@@ -7,9 +7,11 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import test, { afterEach, beforeEach } from "node:test";
+import { onboardingSessionSummarySchema } from "../../../packages/shared/src/onboarding";
 import { createApp } from "../src/app";
 import type { AppEnv } from "../src/config/env";
 import { crmStore } from "../src/store/crm-store";
+import { onboardingStore } from "../src/store/onboarding-store";
 
 let server: Server | undefined;
 let tempRoot = "";
@@ -17,6 +19,7 @@ let tempRoot = "";
 beforeEach(() => {
   tempRoot = mkdtempSync(path.join(tmpdir(), "curve-api-test-"));
   crmStore.reset({ deleteStateFile: true });
+  onboardingStore.reset({ deleteStateFile: true });
 });
 
 afterEach(async () => {
@@ -34,6 +37,7 @@ afterEach(async () => {
   }
 
   crmStore.reset();
+  onboardingStore.reset();
   rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -91,6 +95,21 @@ async function postJson(
   return { response, body };
 }
 
+async function postForm(
+  baseUrl: string,
+  requestPath: string,
+  payload: FormData,
+  headers: Record<string, string> = {},
+) {
+  const response = await fetch(`${baseUrl}${requestPath}`, {
+    method: "POST",
+    headers,
+    body: payload,
+  });
+  const body = await response.json();
+  return { response, body };
+}
+
 function adminHeaders(token = "curve-admin-test-token"): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
@@ -101,6 +120,28 @@ function staffSessionHeaders(token: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
   };
+}
+
+function onboardingHeaders(token: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`,
+    "x-onboarding-token": token,
+  };
+}
+
+function readErrorMessage(body: unknown): string {
+  if (body && typeof body === "object" && "error" in body) {
+    const candidate = (body as { error?: unknown }).error;
+    if (typeof candidate === "string") {
+      return candidate;
+    }
+    if (candidate && typeof candidate === "object" && "message" in candidate) {
+      const message = (candidate as { message?: unknown }).message;
+      return typeof message === "string" ? message : "";
+    }
+  }
+
+  return "";
 }
 
 function automationHeaders(
@@ -405,6 +446,218 @@ test("OTP verification locks out after repeated failures", async () => {
     otpCode: invite.body.otpCode as string,
   });
   assert.equal(lockedOut.response.status, 404);
+});
+
+test("onboarding flow creates a portable interview session and finalizes a staff profile", async () => {
+  const baseUrl = await startServer(makeEnv());
+
+  const invite = await postJson(
+    baseUrl,
+    "/onboarding/invites",
+    {
+      fullName: "Onboarding Reviewer",
+      phoneNumber: "+61499990000",
+      email: "onboard@example.com",
+      ttlHours: 48,
+    },
+    adminHeaders(),
+  );
+  assert.equal(invite.response.status, 201);
+  assert.match(invite.body.invite.code, /^[a-f0-9]{32}$/);
+
+  const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+    inviteCode: invite.body.invite.code,
+  });
+  assert.equal(start.response.status, 201);
+  assert.equal(onboardingSessionSummarySchema.safeParse(start.body.session).success, true);
+  const sessionId = start.body.session.id as string;
+  const participantToken = start.body.session.participantToken as string;
+  assert.equal(start.body.session.status, "pending");
+
+  const voiceSession = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/token`,
+    {
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    },
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(voiceSession.response.status, 200);
+  assert.equal(onboardingSessionSummarySchema.safeParse(voiceSession.body.session).success, true);
+  assert.equal(voiceSession.body.session.status, "interviewing");
+  assert.ok(voiceSession.body.session.voiceSession.sessionToken);
+
+  const participantTurn = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/turns`,
+    {
+      speaker: "participant",
+      text: "We do plumbing across the inner west and charge a callout fee. After hours jobs should usually become a callback unless it is an emergency. We use ServiceM8 today.",
+    },
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(participantTurn.response.status, 201);
+  assert.ok(participantTurn.body.session.analysis.coverage.length > 0);
+  assert.ok(Array.isArray(participantTurn.body.session.review.missingFields));
+
+  const review = await getJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/review`,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(review.response.status, 200);
+  assert.match(review.body.review.crmDiscovery.currentSystem, /ServiceM8|Unknown/);
+
+  const reviewPatch = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/review`,
+    {
+      businessSummary: "Focused plumbing business covering Sydney inner west callouts.",
+      businessPractices: {
+        serviceAreas: ["Inner West", "Sydney"],
+      },
+    },
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(reviewPatch.response.status, 200);
+  assert.equal(reviewPatch.body.session.review.businessSummary, "Focused plumbing business covering Sydney inner west callouts.");
+
+  const calendarStart = await getJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/calendar/microsoft/start`,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(calendarStart.response.status, 200);
+  assert.ok(calendarStart.body.calendar.authUrl);
+
+  const callbackUrl = new URL(calendarStart.body.calendar.authUrl as string);
+  const callbackTarget = new URL(callbackUrl.pathname + callbackUrl.search, baseUrl);
+  const calendarCallback = await fetch(callbackTarget.toString(), {
+    redirect: "manual",
+  });
+  assert.equal(calendarCallback.status, 302);
+
+  const voiceSampleForm = new FormData();
+  voiceSampleForm.set("sampleLabel", "Quiet office introduction");
+  voiceSampleForm.set("durationSeconds", "95");
+  voiceSampleForm.set(
+    "transcript",
+    "Hi, this is Jordan from Sydney Metro Plumbing. We handle urgent leaks, blocked drains, and hot water faults across the inner west.",
+  );
+  voiceSampleForm.set("noiseLevel", "low");
+  voiceSampleForm.set(
+    "sample",
+    new File([Buffer.from("RIFF....WEBM")], "voice-sample.webm", {
+      type: "audio/webm",
+    }),
+  );
+
+  const voiceSample = await postForm(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/voice-sample`,
+    voiceSampleForm,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(voiceSample.response.status, 200);
+  assert.equal(onboardingSessionSummarySchema.safeParse(voiceSample.body.session).success, true);
+  assert.equal(typeof voiceSample.body.session.voiceSample.recommendedForClone, "boolean");
+  assert.equal(existsSync(voiceSample.body.session.voiceSample.storedPath as string), true);
+
+  const finalized = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/finalize`,
+    {},
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(finalized.response.status, 200);
+  assert.equal(onboardingSessionSummarySchema.safeParse(finalized.body.session).success, true);
+  assert.equal(finalized.body.session.status, "completed");
+  assert.equal(finalized.body.staff.id, invite.body.staff.id);
+});
+
+test("onboarding realtime voice session rejects missing consent", async () => {
+  const baseUrl = await startServer(makeEnv());
+
+  const invite = await postJson(
+    baseUrl,
+    "/onboarding/invites",
+    {
+      fullName: "Consent Gap",
+      phoneNumber: "+61400000001",
+    },
+    adminHeaders(),
+  );
+  const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+    inviteCode: invite.body.invite.code,
+  });
+  const sessionId = start.body.session.id as string;
+  const participantToken = start.body.session.participantToken as string;
+
+  const voiceSession = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/token`,
+    {
+      consentAccepted: false,
+      cloneConsentAccepted: false,
+    },
+    onboardingHeaders(participantToken),
+  );
+
+  assert.equal(voiceSession.response.status, 400);
+  assert.match(readErrorMessage(voiceSession.body), /consent/i);
+});
+
+test("onboarding finalize blocks incomplete sessions and voice samples require a real file", async () => {
+  const baseUrl = await startServer(makeEnv());
+
+  const invite = await postJson(
+    baseUrl,
+    "/onboarding/invites",
+    {
+      fullName: "Finalize Guard",
+      phoneNumber: "+61400000002",
+    },
+    adminHeaders(),
+  );
+  const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+    inviteCode: invite.body.invite.code,
+  });
+  const sessionId = start.body.session.id as string;
+  const participantToken = start.body.session.participantToken as string;
+
+  const voiceSession = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/token`,
+    {
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    },
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(voiceSession.response.status, 200);
+
+  const earlyFinalize = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/finalize`,
+    {},
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(earlyFinalize.response.status, 409);
+  assert.match(readErrorMessage(earlyFinalize.body), /calendar/i);
+
+  const metadataOnlyForm = new FormData();
+  metadataOnlyForm.set("sampleLabel", "Metadata only");
+  metadataOnlyForm.set("durationSeconds", "35");
+  metadataOnlyForm.set("noiseLevel", "low");
+  const sampleWithoutFile = await postForm(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/voice-sample`,
+    metadataOnlyForm,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(sampleWithoutFile.response.status, 400);
+  assert.match(readErrorMessage(sampleWithoutFile.body), /audio sample file/i);
 });
 
 test("malformed CRM snapshots are quarantined and ignored", async () => {

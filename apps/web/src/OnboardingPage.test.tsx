@@ -1,0 +1,285 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+
+import App from './App';
+import { clearOnboardingSession } from './lib/onboardingSession';
+
+function renderRoute(initialPath: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'sess_1',
+    inviteCode: 'invite-123',
+    status: 'interviewing',
+    staffId: 'staff_1',
+    staffName: 'Jordan',
+    participantToken: 'session-token',
+    consentAccepted: true,
+    cloneConsentAccepted: true,
+    coverageScore: 0.63,
+    nextQuestion: {
+      id: 'pricing',
+      section: 'pricing',
+      reason: 'Need clearer pricing rules.',
+      question: 'What work do you want the agent to handle?',
+    },
+    review: {
+      businessSummary: 'Jordan Plumbing onboarding is underway.',
+      communicationProfile: {
+        tone: 'Direct and calm',
+        salesStyle: 'Consultative',
+        riskTolerance: 'Escalate uncertain quotes',
+        customerHandlingRules: ['Confirm scope before pricing.'],
+      },
+      pricingProfile: {
+        quotingStyle: 'Fixed price with a callout minimum',
+        calloutPolicy: 'Uses a callout fee',
+        afterHoursPolicy: 'After-hours rules still need confirmation',
+        approvalThreshold: 'Escalate larger jobs',
+      },
+      businessPractices: {
+        services: ['Emergency plumbing'],
+        serviceAreas: ['Inner West Sydney'],
+        operatingHours: 'Weekdays with emergency coverage',
+        exclusions: [],
+        escalationRules: ['After-hours jobs need review.'],
+      },
+      crmDiscovery: {
+        currentSystem: 'ServiceM8',
+        syncPreference: 'Wants sync',
+        sourceOfTruth: 'CRM is the source of truth',
+        notes: [],
+      },
+      missingFields: ['after-hours escalation rule'],
+    },
+    analysis: {
+      coverage: [
+        {
+          id: 'services',
+          title: 'Business facts',
+          status: 'covered',
+          evidence: ['Emergency plumbing and daytime bookings.'],
+        },
+        {
+          id: 'pricing',
+          title: 'Pricing rules',
+          status: 'needs_follow_up',
+          evidence: ['Need clearer after-hours premium rule.'],
+        },
+      ],
+      recommendedQuestions: [
+        {
+          id: 'pricing',
+          section: 'pricing',
+          reason: 'Need clearer pricing rules.',
+          question: 'Do you prefer fixed price or callout pricing?',
+        },
+      ],
+      coverageScore: 0.63,
+      interviewerBrief: 'Ask about pricing next.',
+    },
+    calendar: {
+      provider: 'microsoft',
+      status: 'pending',
+    },
+    turns: [],
+    updatedAt: '2026-04-14T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('onboarding route', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    clearOnboardingSession();
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
+      const method = init?.method ?? 'GET';
+
+      if (url.pathname === '/api/onboarding/sessions/start' && method === 'POST') {
+        return jsonResponse({
+          session: backendSession({
+            status: 'pending',
+            consentAccepted: false,
+            cloneConsentAccepted: false,
+            nextQuestion: null,
+          }),
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/token' && method === 'POST') {
+        return jsonResponse({
+          session: backendSession(),
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1' && method === 'GET') {
+        return jsonResponse({
+          session: backendSession(),
+          checklist: [],
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/turns' && method === 'POST') {
+        return jsonResponse({
+          session: backendSession({
+            turns: [
+              {
+                id: 'turn_1',
+                speaker: 'participant',
+                text: 'Handle emergency plumbing, daytime bookings, and quote follow-ups.',
+                createdAt: '2026-04-14T10:01:00.000Z',
+              },
+            ],
+            nextQuestion: {
+              id: 'pricing',
+              section: 'pricing',
+              reason: 'Need clearer pricing rules.',
+              question: 'Do you prefer fixed price or callout pricing?',
+            },
+            review: {
+              ...backendSession().review,
+              businessSummary: 'Interview in progress.',
+            },
+            updatedAt: '2026-04-14T10:01:00.000Z',
+          }),
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/next-question' && method === 'POST') {
+        return jsonResponse({
+          nextQuestion: {
+            id: 'pricing',
+            section: 'pricing',
+            reason: 'Need clearer pricing rules.',
+            question: 'Do you prefer fixed price or callout pricing?',
+          },
+          interviewerBrief: 'Ask about pricing rules next.',
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'GET') {
+        return jsonResponse({
+          review: backendSession().review,
+          analysis: backendSession().analysis,
+          status: 'review',
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'POST') {
+        return jsonResponse({
+          session: backendSession({
+            status: 'calendar',
+            review: {
+              ...backendSession().review,
+              missingFields: [],
+            },
+            analysis: {
+              ...backendSession().analysis,
+              coverage: backendSession().analysis.coverage.map((item: any) => ({
+                ...item,
+                status: 'covered',
+              })),
+              coverageScore: 0.92,
+            },
+          }),
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/calendar/microsoft/start' && method === 'GET') {
+        return jsonResponse({
+          calendar: {
+            provider: 'microsoft',
+            status: 'pending',
+            authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?mock=1',
+          },
+          session: backendSession({
+            status: 'calendar',
+          }),
+        });
+      }
+
+      return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('walks through invite consent, interview, review, and calendar connect', async () => {
+    const user = userEvent.setup();
+
+    renderRoute('/onboard/invite-123');
+
+    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/i consent to recording/i));
+    await user.click(screen.getByLabelText(/i consent to using a clean voice sample/i));
+    await user.click(screen.getByLabelText(/i consent to using my onboarding responses/i));
+    await user.click(screen.getByRole('button', { name: /begin interview/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /answer the structured interview/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/what work do you want the agent to handle/i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/your response/i), 'Handle emergency plumbing, daytime bookings, and quote follow-ups.');
+    await user.click(screen.getByRole('button', { name: /save response/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/onboarding/sessions/sess_1/turns'),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: /open extraction review/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /review the extracted profile/i })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('ServiceM8')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /save review and continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /connect the staff calendar/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /connect microsoft calendar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /open microsoft connection link/i })).toHaveAttribute(
+        'href',
+        'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?mock=1',
+      );
+    });
+  });
+});

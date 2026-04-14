@@ -4,6 +4,14 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import { type ZodTypeAny } from "zod";
+import { onboardingChecklist } from "./onboarding/checklist";
+import {
+  MockMicrosoftCalendarAdapter,
+  MockReasoningProvider,
+  MockRealtimeVoiceProvider,
+  MockVoiceCloneProvider,
+} from "./onboarding/providers";
+import { OnboardingRuleError, OnboardingService } from "./onboarding/service";
 import { type AppEnv } from "./config/env";
 import {
   crmStore,
@@ -21,10 +29,17 @@ import {
   type VoiceConsentInput,
   type VoiceContextInput,
 } from "./store/crm-store";
+import { onboardingStore } from "./store/onboarding-store";
 import {
   appointmentInputSchema,
   calendarConnectInputSchema,
   callbackInputSchema,
+  onboardingInviteInputSchema,
+  onboardingReviewPatchSchema,
+  onboardingStartInputSchema,
+  onboardingTurnInputSchema,
+  onboardingVoiceSampleInputSchema,
+  onboardingVoiceTokenInputSchema,
   postCallInputSchema,
   pricingInterviewInputSchema,
   quoteInputSchema,
@@ -38,6 +53,9 @@ import {
 type JsonRecord = Record<string, unknown>;
 type AuthenticatedActor = { kind: "admin" } | { kind: "staff"; staffId: string };
 type RequestWithRawBody = Request & { rawBody?: string };
+type RequestWithOnboardingSession = RequestWithRawBody & {
+  onboardingSessionId?: string;
+};
 
 function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -132,7 +150,11 @@ function getAccessToken(req: Request): string | undefined {
     }
   }
 
-  return asString(req.get("x-admin-token")) ?? asString(req.get("x-staff-session"));
+  return (
+    asString(req.get("x-admin-token")) ??
+    asString(req.get("x-staff-session")) ??
+    asString(req.get("x-onboarding-token"))
+  );
 }
 
 function timingSafeEqualText(left: string, right: string): boolean {
@@ -231,6 +253,41 @@ function requireStaffAccess(req: Request, res: Response, env: AppEnv, staffId: s
   return undefined;
 }
 
+function requireOnboardingSession(req: Request, res: Response, sessionId: string | undefined) {
+  const token = getAccessToken(req);
+  if (!sessionId) {
+    respondError(res, 400, "sessionId is required");
+    return undefined;
+  }
+  if (!token) {
+    respondError(res, 401, "Onboarding session authentication is required");
+    return undefined;
+  }
+
+  const session = onboardingStore.authenticateSession(sessionId, token);
+  if (!session) {
+    respondError(res, 403, "Onboarding session token is invalid");
+    return undefined;
+  }
+
+  return session;
+}
+
+function toOnboardingStateFilePath(stateFilePath: string): string {
+  return stateFilePath.endsWith(".json")
+    ? stateFilePath.replace(/\.json$/, ".onboarding.json")
+    : `${stateFilePath}.onboarding.json`;
+}
+
+function handleOnboardingError(res: Response, error: unknown): boolean {
+  if (error instanceof OnboardingRuleError) {
+    respondError(res, error.statusCode, error.message);
+    return true;
+  }
+
+  return false;
+}
+
 function createUploadMiddleware(uploadDir: string) {
   const allowedExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"]);
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -256,6 +313,35 @@ function createUploadMiddleware(uploadDir: string) {
     limits: {
       fileSize: 15 * 1024 * 1024,
       files: 10,
+    },
+  });
+}
+
+function createAudioSampleMiddleware(uploadDir: string) {
+  const allowedExtensions = new Set([".wav", ".mp3", ".m4a", ".webm", ".ogg"]);
+  fs.mkdirSync(uploadDir, { recursive: true });
+  const storage = multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, uploadDir),
+    filename: (_req, file, callback) => {
+      const safeBaseName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, "_");
+      callback(null, `voice-${Date.now()}-${crypto.randomUUID()}-${safeBaseName}`);
+    },
+  });
+
+  return multer({
+    storage,
+    fileFilter: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase();
+      const isAudioMime = file.mimetype.startsWith("audio/");
+      if (!isAudioMime || !allowedExtensions.has(extension)) {
+        callback(new Error("Only audio sample uploads are allowed"));
+        return;
+      }
+      callback(null, true);
+    },
+    limits: {
+      fileSize: 25 * 1024 * 1024,
+      files: 1,
     },
   });
 }
@@ -359,12 +445,23 @@ function toTradieJob(job: JobRecord, publicBaseUrl: string) {
 
 export function createApp(env: AppEnv) {
   crmStore.configurePersistence(env.stateFilePath);
+  onboardingStore.configurePersistence(toOnboardingStateFilePath(env.stateFilePath));
   if (env.enableDemoData) {
     crmStore.seedDemoData();
   }
+  const onboardingService = new OnboardingService(env, {
+    calendar: new MockMicrosoftCalendarAdapter({
+      clientId: process.env.MICROSOFT_GRAPH_CLIENT_ID,
+      tenantId: process.env.MICROSOFT_TENANT_ID,
+    }),
+    reasoning: new MockReasoningProvider(),
+    realtimeVoice: new MockRealtimeVoiceProvider(),
+    voiceClone: new MockVoiceCloneProvider(),
+  });
 
   const app = express();
   const upload = createUploadMiddleware(env.uploadDir);
+  const voiceSampleUpload = createAudioSampleMiddleware(env.uploadDir).single("sample");
   const uploadPhotos = upload.fields([
     { name: "files", maxCount: 10 },
     { name: "photos", maxCount: 10 },
@@ -379,6 +476,7 @@ export function createApp(env: AppEnv) {
     "content-type",
     "x-admin-token",
     "x-staff-session",
+    "x-onboarding-token",
     "x-curve-signature",
     "x-curve-timestamp",
   ].join(", ");
@@ -410,13 +508,358 @@ export function createApp(env: AppEnv) {
       service: "curve-ai-api",
       env: env.nodeEnv,
       uptimeSeconds: Math.round(process.uptime()),
-      stats: crmStore.getStats(),
+      stats: {
+        ...crmStore.getStats(),
+        onboarding: onboardingStore.getStats(),
+      },
       secretsLoaded: env.secretsFilePaths.map((filePath) => path.basename(filePath)),
     });
   });
 
   app.get("/dashboard", adminOnly, (_req, res) => {
     res.json(crmStore.getDashboard(env.publicBaseUrl));
+  });
+
+  app.post("/onboarding/invites", adminOnly, (req, res) => {
+    const body = asObject(req.body);
+    const input = validateInput(
+      res,
+      onboardingInviteInputSchema,
+      {
+        fullName: asString(body.fullName),
+        phoneNumber: asString(body.phoneNumber),
+        email: asString(body.email),
+        role: asString(body.role),
+        ttlHours: asNumber(body.ttlHours),
+      },
+    );
+    if (!input) {
+      return;
+    }
+
+    const invite = onboardingService.createInvite(input);
+    return res.status(201).json({
+      ok: true,
+      invite: {
+        id: invite.invite.id,
+        code: invite.invite.code,
+        fullName: invite.invite.fullName,
+        expiresAt: invite.invite.expiresAt,
+        url: invite.url,
+      },
+      staff: sanitizeStaff(invite.staff),
+    });
+  });
+
+  app.post("/onboarding/sessions/start", (req, res) => {
+    const body = asObject(req.body);
+    const input = validateInput(
+      res,
+      onboardingStartInputSchema,
+      {
+        inviteCode: asString(body.inviteCode),
+      },
+    );
+    if (!input) {
+      return;
+    }
+
+    const session = onboardingService.startSession(input.inviteCode);
+    if (!session) {
+      return respondError(res, 404, "Onboarding invite not found or expired");
+    }
+
+    return res.status(201).json({
+      ok: true,
+      session,
+    });
+  });
+
+  app.get("/onboarding/sessions/:id", (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    return res.json({
+      ok: true,
+      session: onboardingService.getSessionSummary(session),
+      checklist: onboardingChecklist.map((item) => ({
+        id: item.id,
+        section: item.section,
+        title: item.title,
+        prompt: item.prompt,
+      })),
+    });
+  });
+
+  app.post("/onboarding/sessions/:id/token", async (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    const body = asObject(req.body);
+    const input = validateInput(
+      res,
+      onboardingVoiceTokenInputSchema,
+      {
+        consentAccepted: asBoolean(body.consentAccepted),
+        cloneConsentAccepted: asBoolean(body.cloneConsentAccepted),
+      },
+    );
+    if (!input) {
+      return;
+    }
+
+    try {
+      const updated = await onboardingService.provisionRealtimeVoice(session, input);
+      if (!updated) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
+
+      return res.json({
+        ok: true,
+        session: updated,
+      });
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.post("/onboarding/sessions/:id/turns", async (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    const body = asObject(req.body);
+    const input = validateInput(
+      res,
+      onboardingTurnInputSchema,
+      {
+        speaker: asString(body.speaker),
+        text: asString(body.text),
+        questionId: asString(body.questionId),
+      },
+    );
+    if (!input) {
+      return;
+    }
+
+    const updated = await onboardingService.appendTurn(session, input);
+    if (!updated) {
+      return respondError(res, 404, "Onboarding session not found");
+    }
+
+    return res.status(201).json({
+      ok: true,
+      session: updated,
+      nextQuestion: updated.nextQuestion,
+      interviewerBrief: updated.analysis.interviewerBrief,
+    });
+  });
+
+  app.post("/onboarding/sessions/:id/next-question", (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    const summary = onboardingService.getSessionSummary(session);
+    return res.json({
+      ok: true,
+      nextQuestion: summary.nextQuestion,
+      interviewerBrief: summary.analysis.interviewerBrief,
+      coverageScore: summary.coverageScore,
+    });
+  });
+
+  app.get("/onboarding/sessions/:id/review", (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    return res.json({
+      ok: true,
+      review: session.review,
+      analysis: session.analysis,
+      status: session.status,
+    });
+  });
+
+  app.post("/onboarding/sessions/:id/review", (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    const body = asObject(req.body);
+    const input = validateInput(
+      res,
+      onboardingReviewPatchSchema,
+      {
+        businessSummary: asString(body.businessSummary),
+        communicationProfile: asObject(body.communicationProfile),
+        pricingProfile: asObject(body.pricingProfile),
+        businessPractices: asObject(body.businessPractices),
+        crmDiscovery: asObject(body.crmDiscovery),
+        missingFields: Array.isArray(body.missingFields) ? body.missingFields : undefined,
+      },
+    );
+    if (!input) {
+      return;
+    }
+
+    const updated = onboardingService.updateReview(session, input);
+    if (!updated) {
+      return respondError(res, 404, "Onboarding session not found");
+    }
+
+    return res.json({
+      ok: true,
+      session: updated,
+    });
+  });
+
+  app.get("/onboarding/sessions/:id/calendar/microsoft/start", async (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    const updated = await onboardingService.startCalendar(session);
+    if (!updated) {
+      return respondError(res, 404, "Onboarding session not found");
+    }
+
+    return res.json({
+      ok: true,
+      calendar: updated.calendar,
+      session: updated,
+    });
+  });
+
+  app.get("/onboarding/calendar/microsoft/callback", async (req, res) => {
+    const state = asString(req.query.state);
+    if (!state) {
+      return respondError(res, 400, "state is required");
+    }
+
+    const summary = await onboardingService.completeCalendar(state, {
+      code: asString(req.query.code),
+      accountEmail: asString(req.query.email),
+      calendarLabel: asString(req.query.calendar),
+    });
+    if (!summary) {
+      return respondError(res, 404, "Onboarding session not found");
+    }
+
+    const redirectUrl = new URL(
+      `/onboard/${summary.inviteCode}`,
+      env.publicAppUrl.endsWith("/") ? env.publicAppUrl : `${env.publicAppUrl}/`,
+    );
+    redirectUrl.searchParams.set("session", summary.id);
+    redirectUrl.searchParams.set("calendar", summary.calendar?.status ?? "connected");
+    return res.redirect(302, redirectUrl.toString());
+  });
+
+  app.post(
+    "/onboarding/sessions/:id/voice-sample",
+    (req, res, next) => {
+      const session = requireOnboardingSession(req, res, asString(req.params.id));
+      if (!session) {
+        return;
+      }
+
+      (req as RequestWithOnboardingSession).onboardingSessionId = session.id;
+      return next();
+    },
+    voiceSampleUpload,
+    async (req, res) => {
+      const sessionId = (req as RequestWithOnboardingSession).onboardingSessionId;
+      const session = sessionId ? onboardingStore.getSession(sessionId) : undefined;
+      if (!session) {
+        removeUploadedFiles(req.file ? [req.file] : []);
+        return respondError(res, 404, "Onboarding session not found");
+      }
+
+      const body = asObject(req.body);
+      const input = validateInput(
+        res,
+        onboardingVoiceSampleInputSchema,
+        {
+          sampleLabel: asString(body.sampleLabel) ?? req.file?.originalname ?? "Voice sample",
+          durationSeconds: asNumber(body.durationSeconds) ?? 30,
+          transcript: asString(body.transcript),
+          noiseLevel: asString(body.noiseLevel),
+        },
+      );
+      if (!input) {
+        removeUploadedFiles(req.file ? [req.file] : []);
+        return;
+      }
+
+      if (!req.file) {
+        return respondError(res, 400, "An audio sample file is required");
+      }
+
+      try {
+        const updated = await onboardingService.assessVoiceSample(session, {
+          ...input,
+          file: {
+            originalName: req.file.originalname,
+            storedPath: req.file.path,
+            mimeType: req.file.mimetype,
+          },
+        });
+        if (!updated) {
+          removeUploadedFiles(req.file ? [req.file] : []);
+          return respondError(res, 404, "Onboarding session not found");
+        }
+
+        return res.json({
+          ok: true,
+          session: updated,
+        });
+      } catch (error) {
+        removeUploadedFiles(req.file ? [req.file] : []);
+        if (handleOnboardingError(res, error)) {
+          return;
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post("/onboarding/sessions/:id/finalize", (req, res) => {
+    const session = requireOnboardingSession(req, res, asString(req.params.id));
+    if (!session) {
+      return;
+    }
+
+    try {
+      const updated = onboardingService.finalize(session);
+      if (!updated) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
+
+      const staff = crmStore.getStaff(updated.staffId);
+      return res.json({
+        ok: true,
+        session: updated,
+        staff: sanitizeStaff(staff),
+      });
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.post("/voice/context", automationOnly, (req, res) => {

@@ -12,7 +12,7 @@
 
 - Backend: TypeScript API plus worker-friendly service boundaries, Postgres-ready CRM model, local disk fallbacks for uploads, and n8n reserved for secondary automations.
 - Voice: ElevenLabs + Twilio per-staff agents with webhook-driven context, quote tools, booking tools, photo-link tools, callback tools, and post-call ingestion.
-- Staff onboarding: invite + OTP, voice-clone consent, pricing interview upload, Outlook connect, and staff-specific routing data.
+- Staff onboarding: browser-first invite flow, voice-clone consent, structured interview extraction, Outlook connect, clean voice sample upload, and staff-specific routing data.
 - Pricing: base pricebook plus personalized staff pricing profiles, experiment bands, floors, ceilings, audit trails, and accepted-price tracking.
 - Surfaces: internal web ops console, customer upload page, and native SwiftUI staff app with card-style job summaries.
 
@@ -42,3 +42,7 @@
 - Switched the web console admin token from local storage to session storage and aligned the upload UI with the backend image allowlist.
 - Aligned the iOS live client with the real API contract so invite-code verification, calendar connect, consent submission, and job fetches target existing backend routes.
 - Added a persistent local Kanban board in `docs/mvp-board.md` to track MVP progress and review debt between sessions.
+- Added portable onboarding contracts in `packages/shared`, a separate onboarding store, mock provider interfaces for realtime voice/reasoning/calendar/clone flows, and browser-first onboarding routes in the API.
+- Added the browser onboarding webapp at `/onboard/:inviteCode` with consent, structured interview capture, extraction review, Microsoft calendar connect, voice sample upload, and finalize steps.
+- Fixed the first deep review findings on onboarding: realtime voice sessions now require consent server-side, finalize is blocked until calendar + voice sample are present, and voice sample uploads require an actual audio file instead of metadata-only requests.
+- Extended the API suite to cover the new onboarding happy path, consent rejection, finalize guardrails, multipart audio uploads, and contract validation against `packages/shared`.

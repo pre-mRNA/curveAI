@@ -43,9 +43,16 @@ The app expects a JSON API at `VITE_API_BASE_URL` or `/api` if the variable is n
 ## Admin token
 
 The internal dashboard requires an admin token before it will request live data. The token is stored in
-`localStorage` under `curve-ai.admin-token` after you enter it in the UI.
+`sessionStorage` under `curve-ai.admin-token` after you enter it in the UI.
+
+## Onboarding
+
+The browser onboarding flow lives at `/onboard/:inviteCode`. It uses the invite code to bootstrap a secure
+session, then walks through consent, interview, extraction review, Microsoft calendar connect, voice sample
+capture, and finalization without falling back to mock data.
 
 ## Routes
 
 - `/` internal dashboard
+- `/onboard/:inviteCode` secure staff onboarding
 - `/upload/:token` public photo upload page
