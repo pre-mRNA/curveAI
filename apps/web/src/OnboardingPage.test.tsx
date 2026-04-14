@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import App from './App';
-import { clearOnboardingSession } from './lib/onboardingSession';
+import { clearOnboardingSession, saveOnboardingSession } from './lib/onboardingSession';
 
 function renderRoute(initialPath: string) {
   return render(
@@ -226,6 +226,7 @@ describe('onboarding route', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('walks through invite consent, interview, review, and calendar connect', async () => {
@@ -280,6 +281,171 @@ describe('onboarding route', () => {
         'href',
         'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?mock=1',
       );
+    });
+  });
+
+  it('uploads a recorded voice sample with the real elapsed duration', async () => {
+    const user = userEvent.setup();
+    const stopTrack = vi.fn();
+    const mediaStream = {
+      getTracks: () => [{ stop: stopTrack }],
+    } as unknown as MediaStream;
+    let voiceSampleUploaded = false;
+    let uploadedDuration = '';
+    let uploadedFilename = '';
+    let now = 1_000;
+
+    class MockMediaRecorder {
+      stream: MediaStream;
+      mimeType = 'audio/webm';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+
+      constructor(stream: MediaStream) {
+        this.stream = stream;
+      }
+
+      start() {}
+
+      stop() {
+        this.ondataavailable?.({
+          data: new Blob(['voice sample'], { type: 'audio/webm' }),
+        });
+        this.onstop?.();
+      }
+    }
+
+    vi.stubGlobal('MediaRecorder', MockMediaRecorder as unknown as typeof MediaRecorder);
+    Object.defineProperty(window.navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue(mediaStream),
+      },
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:voice-sample'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    saveOnboardingSession({
+      inviteCode: 'invite-123',
+      sessionId: 'sess_1',
+      sessionToken: 'session-token',
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
+      const method = init?.method ?? 'GET';
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1' && method === 'GET') {
+        return jsonResponse({
+          session: backendSession({
+            status: 'voice_sample',
+            calendar: {
+              provider: 'microsoft',
+              status: 'connected',
+              accountEmail: 'jordan@example.com',
+            },
+            voiceSample: voiceSampleUploaded
+              ? {
+                  sampleLabel: 'Browser voice sample',
+                  recommendedForClone: true,
+                  qualityScore: 0.88,
+                  reasons: ['Clear browser recording'],
+                }
+              : undefined,
+            turns: [
+              {
+                id: 'turn_voice_1',
+                speaker: 'participant',
+                text: 'We handle emergency plumbing across the inner west.',
+                createdAt: '2026-04-14T10:02:00.000Z',
+              },
+            ],
+            updatedAt: '2026-04-14T10:02:00.000Z',
+          }),
+          checklist: [],
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'GET') {
+        return jsonResponse({
+          review: backendSession().review,
+          analysis: backendSession().analysis,
+          status: 'voice_sample',
+        });
+      }
+
+      if (url.pathname === '/api/onboarding/sessions/sess_1/voice-sample' && method === 'POST') {
+        const formData = init?.body as FormData;
+        uploadedDuration = String(formData.get('durationSeconds'));
+        const sample = formData.get('sample');
+        uploadedFilename = sample instanceof File ? sample.name : '';
+        voiceSampleUploaded = true;
+
+        return jsonResponse({
+          session: backendSession({
+            status: 'voice_sample',
+            calendar: {
+              provider: 'microsoft',
+              status: 'connected',
+              accountEmail: 'jordan@example.com',
+            },
+            voiceSample: {
+              sampleLabel: 'Browser voice sample',
+              recommendedForClone: true,
+              qualityScore: 0.88,
+              reasons: ['Clear browser recording'],
+            },
+            turns: [
+              {
+                id: 'turn_voice_1',
+                speaker: 'participant',
+                text: 'We handle emergency plumbing across the inner west.',
+                createdAt: '2026-04-14T10:02:00.000Z',
+              },
+            ],
+            updatedAt: '2026-04-14T10:03:00.000Z',
+          }),
+        });
+      }
+
+      return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
+    });
+
+    renderRoute('/onboard/invite-123');
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /capture a clean sample for cloning/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /start recording/i }));
+    now = 96_000;
+    await user.click(screen.getByRole('button', { name: /stop recording/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sample captured/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /upload sample/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/onboarding/sessions/sess_1/voice-sample'),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    expect(uploadedDuration).toBe('95');
+    expect(uploadedFilename).toBe('voice-sample.webm');
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /lock the onboarding profile/i })).toBeInTheDocument();
     });
   });
 });

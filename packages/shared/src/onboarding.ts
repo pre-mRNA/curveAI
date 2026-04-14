@@ -21,6 +21,13 @@ export const checklistItemSchema = z.object({
   evidence: z.array(z.string()).default([]),
 });
 
+export const onboardingChecklistPromptSchema = z.object({
+  id: z.string(),
+  section: z.string(),
+  title: z.string(),
+  prompt: z.string(),
+});
+
 export const interviewTurnSchema = z.object({
   id: z.string(),
   speaker: interviewSpeakerSchema,
@@ -134,7 +141,34 @@ export const onboardingSessionSummarySchema = z.object({
   updatedAt: z.string(),
 });
 
+export const onboardingSessionEnvelopeSchema = z.object({
+  session: onboardingSessionSummarySchema,
+  checklist: z.array(onboardingChecklistPromptSchema).optional(),
+});
+
+export const onboardingReviewEnvelopeSchema = z.object({
+  review: extractionReviewSchema,
+  analysis: onboardingAnalysisSchema,
+  status: onboardingSessionStatusSchema,
+});
+
+export const onboardingNextQuestionEnvelopeSchema = z.object({
+  nextQuestion: supervisorPromptSchema.nullable(),
+  interviewerBrief: z.string(),
+  coverageScore: z.number().min(0).max(1).optional(),
+});
+
+export const onboardingCalendarStartResponseSchema = z.object({
+  calendar: calendarConnectionSummarySchema.optional(),
+  session: onboardingSessionSummarySchema,
+});
+
+export type CoverageStatus = z.infer<typeof coverageStatusSchema>;
+export type OnboardingSessionStatus = z.infer<typeof onboardingSessionStatusSchema>;
+export type InterviewSpeaker = z.infer<typeof interviewSpeakerSchema>;
+export type OnboardingProviderMode = z.infer<typeof onboardingProviderModeSchema>;
 export type ChecklistItem = z.infer<typeof checklistItemSchema>;
+export type OnboardingChecklistPrompt = z.infer<typeof onboardingChecklistPromptSchema>;
 export type InterviewTurn = z.infer<typeof interviewTurnSchema>;
 export type CommunicationProfile = z.infer<typeof communicationProfileSchema>;
 export type PricingProfileSummary = z.infer<typeof pricingProfileSummarySchema>;
@@ -147,3 +181,7 @@ export type RealtimeVoiceSession = z.infer<typeof realtimeVoiceSessionSchema>;
 export type CalendarConnectionSummary = z.infer<typeof calendarConnectionSummarySchema>;
 export type VoiceSampleAssessment = z.infer<typeof voiceSampleAssessmentSchema>;
 export type OnboardingSessionSummary = z.infer<typeof onboardingSessionSummarySchema>;
+export type OnboardingSessionEnvelope = z.infer<typeof onboardingSessionEnvelopeSchema>;
+export type OnboardingReviewEnvelope = z.infer<typeof onboardingReviewEnvelopeSchema>;
+export type OnboardingNextQuestionEnvelope = z.infer<typeof onboardingNextQuestionEnvelopeSchema>;
+export type OnboardingCalendarStartResponse = z.infer<typeof onboardingCalendarStartResponseSchema>;

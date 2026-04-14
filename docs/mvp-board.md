@@ -26,6 +26,6 @@
 
 ## Review Queue
 
-- Move the `/jobs` and public onboarding DTOs fully into `packages/shared` so iOS/web/api stop carrying parallel shapes.
+- Move the API-side onboarding serializers onto shared schemas directly so the route payloads and shared contracts cannot drift at runtime.
 - Revisit admin-token auth for the web console before production; session storage is better than local storage, but not a final control plane auth story.
 - Revisit OTP issuance and transport once Twilio Verify is wired in; the current in-house flow is an MVP guardrail, not a final identity solution.

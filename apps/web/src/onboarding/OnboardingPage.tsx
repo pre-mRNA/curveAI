@@ -481,6 +481,7 @@ export default function OnboardingPage() {
         setVoiceBlob(blob);
         const startedAt = recordingStartedAtRef.current ?? Date.now();
         setVoiceDurationSeconds(Math.max(5, Math.round((Date.now() - startedAt) / 1000)));
+        recordingStartedAtRef.current = null;
         const nextUrl = URL.createObjectURL(blob);
         setVoicePreviewUrl((currentUrl) => {
           if (currentUrl) {
@@ -502,7 +503,6 @@ export default function OnboardingPage() {
   const stopVoiceRecording = () => {
     recorderRef.current?.stop();
     recorderRef.current = null;
-    recordingStartedAtRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   };

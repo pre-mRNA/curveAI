@@ -46,3 +46,5 @@
 - Added the browser onboarding webapp at `/onboard/:inviteCode` with consent, structured interview capture, extraction review, Microsoft calendar connect, voice sample upload, and finalize steps.
 - Fixed the first deep review findings on onboarding: realtime voice sessions now require consent server-side, finalize is blocked until calendar + voice sample are present, and voice sample uploads require an actual audio file instead of metadata-only requests.
 - Extended the API suite to cover the new onboarding happy path, consent rejection, finalize guardrails, multipart audio uploads, and contract validation against `packages/shared`.
+- Fixed a follow-up browser regression where recorded voice samples were being scored as five-second clips regardless of actual duration, and added a web test that exercises recording -> upload -> finalize progression.
+- Pulled the onboarding session/review envelope types into `packages/shared` and switched the web client to consume those shared contracts instead of redeclaring backend DTOs locally.

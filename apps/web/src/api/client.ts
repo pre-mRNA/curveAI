@@ -11,6 +11,19 @@ import type {
   OnboardingTurnPayload,
   VoiceSampleUploadResponse,
 } from '../types';
+import type {
+  ChecklistItem as BackendCoverageItem,
+  ExtractionReview as BackendReview,
+  InterviewSpeaker as BackendTurnSpeaker,
+  OnboardingAnalysis as BackendAnalysis,
+  OnboardingCalendarStartResponse as BackendCalendarStartResponse,
+  OnboardingNextQuestionEnvelope as BackendNextQuestionEnvelope,
+  OnboardingReviewEnvelope as BackendReviewEnvelope,
+  OnboardingSessionEnvelope as BackendSessionEnvelope,
+  OnboardingSessionStatus as BackendSessionStatus,
+  OnboardingSessionSummary as BackendSessionSummary,
+  SupervisorPrompt as BackendSupervisorPrompt,
+} from '../../../../packages/shared/src/onboarding';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
 
@@ -28,107 +41,6 @@ type AuthOptions = {
   adminToken?: string;
   bearerToken?: string;
 };
-
-type BackendCoverageStatus = 'pending' | 'covered' | 'needs_follow_up';
-type BackendSessionStatus = 'pending' | 'interviewing' | 'review' | 'calendar' | 'voice_sample' | 'completed';
-type BackendTurnSpeaker = 'agent' | 'participant' | 'system';
-
-interface BackendSupervisorPrompt {
-  id: string;
-  section: string;
-  reason: string;
-  question: string;
-}
-
-interface BackendCoverageItem {
-  id: string;
-  title: string;
-  status: BackendCoverageStatus;
-  evidence: string[];
-}
-
-interface BackendReview {
-  businessSummary: string;
-  communicationProfile: {
-    tone: string;
-    salesStyle: string;
-    riskTolerance: string;
-    customerHandlingRules: string[];
-  };
-  pricingProfile: {
-    quotingStyle: string;
-    calloutPolicy: string;
-    afterHoursPolicy: string;
-    approvalThreshold: string;
-  };
-  businessPractices: {
-    services: string[];
-    serviceAreas: string[];
-    operatingHours: string;
-    exclusions: string[];
-    escalationRules: string[];
-  };
-  crmDiscovery: {
-    currentSystem: string;
-    syncPreference: string;
-    sourceOfTruth: string;
-    notes: string[];
-  };
-  missingFields: string[];
-}
-
-interface BackendSessionSummary {
-  id: string;
-  inviteCode: string;
-  status: BackendSessionStatus;
-  staffId: string;
-  staffName: string;
-  participantToken: string;
-  consentAccepted: boolean;
-  cloneConsentAccepted: boolean;
-  coverageScore: number;
-  nextQuestion: BackendSupervisorPrompt | null;
-  review: BackendReview;
-  analysis: {
-    coverage: BackendCoverageItem[];
-    recommendedQuestions: BackendSupervisorPrompt[];
-    coverageScore: number;
-    interviewerBrief: string;
-  };
-  voiceSession?: {
-    sessionToken: string;
-    expiresAt?: string;
-  };
-  calendar?: {
-    provider: string;
-    status: 'pending' | 'connected';
-    authUrl?: string;
-    accountEmail?: string;
-  };
-  voiceSample?: {
-    sampleLabel: string;
-    recommendedForClone: boolean;
-    qualityScore: number;
-    reasons: string[];
-  };
-  turns: Array<{
-    id: string;
-    speaker: BackendTurnSpeaker;
-    text: string;
-    createdAt: string;
-  }>;
-  updatedAt?: string;
-}
-
-interface BackendSessionEnvelope {
-  session: BackendSessionSummary;
-}
-
-interface BackendReviewEnvelope {
-  review: BackendReview;
-  analysis: BackendSessionSummary['analysis'];
-  status: BackendSessionStatus;
-}
 
 function createHeaders(initHeaders?: HeadersInit, auth?: AuthOptions): Headers {
   const headers = new Headers(initHeaders ?? {});
@@ -234,7 +146,7 @@ function mapSession(session: BackendSessionSummary): OnboardingSession {
   };
 }
 
-function mapReview(review: BackendReview, analysis: BackendSessionSummary['analysis']): OnboardingReview {
+function mapReview(review: BackendReview, analysis: BackendAnalysis): OnboardingReview {
   return {
     summary: review.businessSummary,
     confidence: toConfidenceLabel(analysis.coverageScore),
@@ -325,7 +237,7 @@ export const apiClient = {
   },
 
   async getOnboardingSession(sessionId: string, sessionToken: string): Promise<OnboardingSession> {
-    const response = await requestJson<BackendSessionEnvelope & { checklist: unknown[] }>(
+    const response = await requestJson<BackendSessionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}`,
       undefined,
       {
@@ -367,7 +279,7 @@ export const apiClient = {
     sessionId: string,
     sessionToken: string,
   ): Promise<OnboardingNextQuestionResponse> {
-    const response = await requestJson<{ nextQuestion: BackendSupervisorPrompt | null; interviewerBrief: string }>(
+    const response = await requestJson<BackendNextQuestionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/next-question`,
       {
         method: 'POST',
@@ -435,7 +347,7 @@ export const apiClient = {
     sessionId: string,
     sessionToken: string,
   ): Promise<CalendarConnectResponse> {
-    const response = await requestJson<{ calendar?: BackendSessionSummary['calendar']; session: BackendSessionSummary }>(
+    const response = await requestJson<BackendCalendarStartResponse>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/calendar/microsoft/start`,
       undefined,
       {
