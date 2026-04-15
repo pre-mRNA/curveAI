@@ -6,6 +6,7 @@
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
 - Cloudflare deployment: remove or retire the Express reference API once the remaining niche routes and local-dev docs no longer point at it.
 - Security hardening: add content sniffing for uploads and move from file-backed CRM persistence to a real database.
+- iOS alignment: decide whether to migrate the staff app onto the Worker onboarding-session contract or keep the slimmer `/staff/*` flow as an intentional compatibility layer.
 
 ## Next
 
@@ -37,4 +38,4 @@
 - Revisit admin-token auth for the web console before production; session storage is better than local storage, but not a final control plane auth story.
 - Revisit OTP issuance and transport once Twilio Verify is wired in; the current in-house flow is an MVP guardrail, not a final identity solution.
 - Decide whether the SwiftUI app should keep the legacy `/staff/*` OTP/session flow or switch to the newer onboarding-session model before removing the Express reference API.
-- Tighten staff invite delivery so staging/dev OTP visibility is explicitly env-gated rather than always returned by the Worker admin route.
+- Add a small set of Worker-backed contract tests around the iOS live client paths so API drift is caught before the SwiftUI app breaks.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -17,7 +18,8 @@ describe('onboarding app routing', () => {
     renderRoute('/');
 
     expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
-    expect(screen.getByText(/invite-gated/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/invite-gated/i)).not.toHaveLength(0);
+    expect(screen.getByRole('button', { name: /open onboarding/i })).toBeInTheDocument();
   });
 
   it('keeps the invite route available for the onboarding flow', () => {
@@ -26,5 +28,15 @@ describe('onboarding app routing', () => {
     expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
     expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /begin interview/i })).toBeInTheDocument();
+  });
+
+  it('lets the landing page recover a session from an invite code', async () => {
+    const user = userEvent.setup();
+    renderRoute('/');
+
+    await user.type(screen.getByLabelText(/invite code/i), 'invite-123');
+    await user.click(screen.getByRole('button', { name: /open onboarding/i }));
+
+    expect(await screen.findByText('invite-123', { selector: 'code' })).toBeInTheDocument();
   });
 });

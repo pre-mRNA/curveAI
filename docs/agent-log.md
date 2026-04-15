@@ -58,3 +58,10 @@
 - Migrated the remaining SwiftUI-facing staff session flow into the Worker: `/staff/invite`, `/staff/verify-otp`, `/staff/me`, `/staff/voice-consent`, `/staff/pricing-interview`, `/staff/calendar/connect`, and staff-scoped `/jobs` access.
 - Added Worker-side D1 models for staff auth state, staff sessions, and calendar connections, plus coverage for OTP verification and staff-scoped job access.
 - Tightened the new Worker staff invite route so raw OTPs are only exposed when `ALLOW_INSECURE_TEST_OTP=true` is explicitly enabled for non-production workflows.
+- Ran a second multiagent review pass across deployment, Worker security, onboarding UX, upload UX, iOS contract drift, and cross-app design consistency before the next implementation batch.
+- Hardened the Worker config path so non-local requests fail fast when public URLs or signing secrets are missing, `/health` reports readiness warnings, `X-Staff-Session` is allowed through CORS, and photo asset signing no longer falls back to unrelated secrets.
+- Parameterized the D1 migration scripts via `CLOUDFLARE_D1_DATABASE` instead of hardcoding the staging database name.
+- Closed an upload race in both D1 and in-memory repositories so expired or already-completed upload tokens cannot be finalized after object writes, and the Worker now cleans up staged objects if completion fails.
+- Reworked the onboarding landing page into a real recovery surface with invite-code entry, clearer step cards, and denser mobile progress UI instead of the previous dead-end info page.
+- Upgraded the public upload page so it fetches the upload token context, shows friendlier error copy, uses a more action-first layout on phones, and keeps the visual system aligned with the onboarding and ops apps.
+- Updated Cloudflare deployment docs and the onboarding web README to document `VITE_API_BASE_URL`, `CLOUDFLARE_D1_DATABASE`, and the Worker readiness contract.

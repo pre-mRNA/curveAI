@@ -17,15 +17,68 @@ function statusTone(status: JobSummary['status']) {
   }
 }
 
+function formatStatusLabel(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-AU', {
+    style: 'currency',
+    currency: 'AUD',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="section-header">
+      {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
+      <div className="section-title-row">
+        <h2>{title}</h2>
+        {description ? <p className="muted">{description}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      <p className="muted">{description}</p>
+    </div>
+  );
+}
+
 function LoadingPanel() {
   return (
     <div className="card">
       <div className="card-inner">
-        <div className="skeleton" style={{ height: 24, width: '40%', borderRadius: 12 }} />
-        <div style={{ height: 14 }} />
-        <div className="skeleton" style={{ height: 96, width: '100%', borderRadius: 16 }} />
-        <div style={{ height: 12 }} />
-        <div className="skeleton" style={{ height: 96, width: '100%', borderRadius: 16 }} />
+        <SectionHeader eyebrow="Loading" title="Fetching live queue data" description="Waiting for the dashboard payload." />
+        <div className="dashboard-stats">
+          <div className="stat">
+            <div className="skeleton stat-line" />
+            <div className="skeleton stat-value" />
+          </div>
+          <div className="stat">
+            <div className="skeleton stat-line" />
+            <div className="skeleton stat-value" />
+          </div>
+          <div className="stat">
+            <div className="skeleton stat-line" />
+            <div className="skeleton stat-value" />
+          </div>
+        </div>
+        <div className="skeleton job-skeleton" />
+        <div className="skeleton job-skeleton" />
       </div>
     </div>
   );
@@ -146,6 +199,21 @@ function InternalDashboard() {
   }, [storedToken, retryNonce]);
 
   const activeJob = useMemo(() => payload?.jobs[0] ?? null, [payload]);
+  const topStats = useMemo(
+    () =>
+      payload
+        ? [
+            { label: 'Jobs', value: payload.jobs.length.toString() },
+            { label: 'Callbacks', value: payload.callbacks.length.toString() },
+            { label: 'Experiments', value: payload.experiments.length.toString() },
+            {
+              label: 'Latest quote',
+              value: activeJob ? formatCurrency(activeJob.quote.presentedPrice) : '—',
+            },
+          ]
+        : [],
+    [activeJob, payload],
+  );
 
   const submitToken = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -172,27 +240,37 @@ function InternalDashboard() {
   };
 
   return (
-    <div className="shell">
+    <div className="shell dashboard-shell">
       <div className="container">
-        <header className="hero">
-          <div className="eyebrow">Internal Ops Console</div>
-          <h1>Card-based job control for calls, quotes, callbacks, and pricing tests.</h1>
-          <p>Use an admin token to open the live queue.</p>
+        <header className="hero hero--dashboard">
+          <div className="hero-copy">
+            <div className="eyebrow">Internal Ops Console</div>
+            <h1>Live job control for calls, quotes, callbacks, and pricing tests.</h1>
+            <p>Use an admin token to open the live queue. The layout stays readable on desktop and mobile.</p>
+          </div>
+          <div className="hero-card">
+            <span className="pill accent">Private dashboard</span>
+            <strong>Operational view</strong>
+            <p className="muted">Queue status, pricing signals, and callback follow-up in one place.</p>
+          </div>
         </header>
 
-        <div className="topbar">
-          <div>
+        <div className="topbar dashboard-topbar">
+          <div className="topbar-copy">
             <strong>{storedToken ? 'Authenticated dashboard' : 'Admin token required'}</strong>
             <span className="muted">
               {storedToken ? 'Connected to live dashboard data.' : 'Enter your admin token to load the queue.'}
             </span>
           </div>
-          <div className="meta-row">
-            {payload ? <span className="pill accent">{payload.jobs.length} jobs</span> : null}
-            {payload ? <span className="pill good">{payload.callbacks.length} callbacks</span> : null}
-            {payload ? <span className="pill warn">{payload.experiments.length} pricing tests</span> : null}
+          <div className="topbar-stats">
+            {topStats.map((stat) => (
+              <div className="mini-stat" key={stat.label}>
+                <span className="muted">{stat.label}</span>
+                <strong>{stat.value}</strong>
+              </div>
+            ))}
           </div>
-          <div className="meta-row">
+          <div className="topbar-actions">
             {storedToken ? (
               <>
                 <button className="button secondary" type="button" onClick={() => setRetryNonce((value) => value + 1)}>
@@ -207,60 +285,52 @@ function InternalDashboard() {
         </div>
 
         {!storedToken ? (
-          <>
-            <div style={{ height: 18 }} />
-            <DashboardAuthPanel
-              tokenDraft={tokenDraft}
-              onTokenDraftChange={setTokenDraft}
-              onSubmit={submitToken}
-              onClear={clearToken}
-              authError={authError}
-              loading={loading}
-            />
-          </>
+          <DashboardAuthPanel
+            tokenDraft={tokenDraft}
+            onTokenDraftChange={setTokenDraft}
+            onSubmit={submitToken}
+            onClear={clearToken}
+            authError={authError}
+            loading={loading}
+          />
         ) : null}
 
         {requestError ? (
-          <>
-            <div style={{ height: 18 }} />
-            <div className="card">
-              <div className="card-inner">
-                <div className="eyebrow">Dashboard request failed</div>
-                <h2>Unable to load live data.</h2>
-                <p className="muted">{requestError}</p>
-              </div>
+          <div className="card">
+            <div className="card-inner" role="alert">
+              <div className="eyebrow">Dashboard request failed</div>
+              <h2>Unable to load live data.</h2>
+              <p className="muted">{requestError}</p>
             </div>
-          </>
+          </div>
         ) : null}
 
-        {storedToken && loading ? (
-          <>
-            <div style={{ height: 18 }} />
-            <LoadingPanel />
-          </>
-        ) : null}
+        {storedToken && loading ? <LoadingPanel /> : null}
 
         {storedToken && payload ? (
-          <>
-            <div style={{ height: 18 }} />
-            <div className="grid onboarding-grid">
-              <section className="stack">
-                <div className="card">
-                  <div className="card-inner">
-                    <h2>Job summaries</h2>
-                    <div className="jobs">
-                      {payload.jobs.map((job) => (
+          <div className="dashboard-grid">
+            <section className="stack">
+              <div className="card">
+                <div className="card-inner">
+                  <SectionHeader
+                    eyebrow="Queue"
+                    title="Job summaries"
+                    description="High-signal view of customer context, price, and follow-up status."
+                  />
+                  <div className="jobs">
+                    {payload.jobs.length ? (
+                      payload.jobs.map((job) => (
                         <article className="job" key={job.id}>
                           <div className="job-header">
                             <div>
                               <strong>{job.customerName}</strong>
                               <div className="muted">{job.suburb}</div>
                             </div>
-                            <span className={`pill ${statusTone(job.status)}`}>{job.status.replace('_', ' ')}</span>
+                            <span className={`pill ${statusTone(job.status)}`}>{formatStatusLabel(job.status)}</span>
                           </div>
-                          <div>{job.summary}</div>
+                          <p className="job-summary">{job.summary}</p>
                           <div className="meta-row">
-                            <span className="pill">Quote ${job.quote.presentedPrice}</span>
+                            <span className="pill">Quote {formatCurrency(job.quote.presentedPrice)}</span>
                             <span className="pill">Confidence {job.quote.confidence}</span>
                             <span className="pill">Updated {job.updatedAt}</span>
                           </div>
@@ -274,16 +344,24 @@ function InternalDashboard() {
                           </div>
                           {job.callback ? <div className="pill warn">Callback: {job.callback.reason}</div> : null}
                         </article>
-                      ))}
-                    </div>
+                      ))
+                    ) : (
+                      <EmptyState title="No jobs yet" description="When work lands, the live queue will appear here." />
+                    )}
                   </div>
                 </div>
+              </div>
 
-                <div className="card">
-                  <div className="card-inner">
-                    <h3>Pricing experiments</h3>
-                    <div className="jobs">
-                      {payload.experiments.map((experiment) => (
+              <div className="card">
+                <div className="card-inner">
+                  <SectionHeader
+                    eyebrow="Pricing"
+                    title="Pricing experiments"
+                    description="Monitor variant exposure and lift without digging through logs."
+                  />
+                  <div className="jobs">
+                    {payload.experiments.length ? (
+                      payload.experiments.map((experiment) => (
                         <div className="job" key={experiment.name}>
                           <div className="job-header">
                             <strong>{experiment.name}</strong>
@@ -295,44 +373,50 @@ function InternalDashboard() {
                             <span className="pill">{experiment.sampleSize} samples</span>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      ))
+                    ) : (
+                      <EmptyState title="No experiments" description="Pricing tests will show up here once they are active." />
+                    )}
                   </div>
                 </div>
-              </section>
+              </div>
+            </section>
 
-              <aside className="stack">
-                <div className="card">
-                  <div className="card-inner">
-                    <h3>Quote state</h3>
-                    {activeJob ? (
-                      <div className="quote-grid">
-                        <div className="stat">
-                          <span className="muted">Base price</span>
-                          <strong>${activeJob.quote.basePrice}</strong>
-                        </div>
-                        <div className="stat">
-                          <span className="muted">Strategy adjustment</span>
-                          <strong>${activeJob.quote.strategyAdjustment}</strong>
-                        </div>
-                        <div className="stat">
-                          <span className="muted">Experiment adjustment</span>
-                          <strong>${activeJob.quote.experimentAdjustment}</strong>
-                        </div>
-                        <div className="stat">
-                          <span className="muted">Presented price</span>
-                          <strong>${activeJob.quote.presentedPrice}</strong>
-                        </div>
+            <aside className="stack">
+              <div className="card">
+                <div className="card-inner">
+                  <SectionHeader eyebrow="Quote" title="Current quote state" description="Useful for quick sanity checks before you call back." />
+                  {activeJob ? (
+                    <div className="quote-grid">
+                      <div className="stat">
+                        <span className="muted">Base price</span>
+                        <strong>{formatCurrency(activeJob.quote.basePrice)}</strong>
                       </div>
-                    ) : null}
-                  </div>
+                      <div className="stat">
+                        <span className="muted">Strategy adjustment</span>
+                        <strong>{formatCurrency(activeJob.quote.strategyAdjustment)}</strong>
+                      </div>
+                      <div className="stat">
+                        <span className="muted">Experiment adjustment</span>
+                        <strong>{formatCurrency(activeJob.quote.experimentAdjustment)}</strong>
+                      </div>
+                      <div className="stat">
+                        <span className="muted">Presented price</span>
+                        <strong>{formatCurrency(activeJob.quote.presentedPrice)}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <EmptyState title="No active job" description="The quote panel will lock onto the first live job in the queue." />
+                  )}
                 </div>
+              </div>
 
-                <div className="card">
-                  <div className="card-inner">
-                    <h3>Callbacks</h3>
-                    <div className="jobs">
-                      {payload.callbacks.map((callback) => (
+              <div className="card">
+                <div className="card-inner">
+                  <SectionHeader eyebrow="Callbacks" title="Follow-up queue" description="Prioritise callers that need a manual touch." />
+                  <div className="jobs">
+                    {payload.callbacks.length ? (
+                      payload.callbacks.map((callback) => (
                         <div className="job" key={callback.id}>
                           <div className="job-header">
                             <div>
@@ -340,21 +424,23 @@ function InternalDashboard() {
                               <div className="muted">{callback.phone}</div>
                             </div>
                             <span className={`pill ${callback.status === 'queued' ? 'warn' : 'good'}`}>
-                              {callback.status}
+                              {formatStatusLabel(callback.status)}
                             </span>
                           </div>
-                          <div>{callback.reason}</div>
+                          <div className="job-summary">{callback.reason}</div>
                           <div className="meta-row">
                             <span className="pill">{callback.dueAt}</span>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      ))
+                    ) : (
+                      <EmptyState title="No callbacks" description="Completed follow-ups will disappear from this queue." />
+                    )}
                   </div>
                 </div>
-              </aside>
-            </div>
-          </>
+              </div>
+            </aside>
+          </div>
         ) : null}
       </div>
     </div>

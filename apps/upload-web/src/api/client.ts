@@ -1,4 +1,15 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
+import { resolveApiBaseUrl } from './baseUrl';
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+export type UploadRequestSummary = {
+  token: string;
+  jobId: string;
+  notes?: string;
+  fileCount: number;
+  status: string;
+  expiresAt: string;
+};
 
 export class ApiError extends Error {
   status: number;
@@ -7,6 +18,19 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+  }
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as {
+      error?: {
+        message?: string;
+      };
+    };
+    return body.error?.message ?? fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -20,8 +44,21 @@ export async function uploadPhotos(token: string, files: File[]): Promise<{ ok: 
   });
 
   if (!response.ok) {
-    throw new ApiError(response.status, `Upload failed: ${response.status}`);
+    throw new ApiError(response.status, await readErrorMessage(response, `Upload failed: ${response.status}`));
   }
 
   return (await response.json()) as { ok: true; uploaded: number };
+}
+
+export async function getUploadRequest(token: string): Promise<UploadRequestSummary> {
+  const response = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(token)}`);
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorMessage(response, `Upload request failed: ${response.status}`));
+  }
+
+  const body = (await response.json()) as {
+    upload: UploadRequestSummary;
+  };
+  return body.upload;
 }

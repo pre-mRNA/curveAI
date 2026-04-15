@@ -89,4 +89,68 @@ describe('dashboard auth', () => {
     expect(authState.clearAdminToken).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/admin token rejected/i)).toBeInTheDocument();
   });
+
+  it('renders the operational queue after a successful load', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        jobs: [
+          {
+            id: 'job_1',
+            customerName: 'Sam Taylor',
+            suburb: 'Marrickville',
+            summary: 'Inspect the ceiling leak and quote the roof repair.',
+            status: 'quoted',
+            photos: [{ id: 'photo_1', url: '/photo-1.jpg', caption: 'Water damage in the lounge' }],
+            quote: {
+              basePrice: 1200,
+              strategyAdjustment: 80,
+              experimentAdjustment: -20,
+              presentedPrice: 1260,
+              confidence: 'high',
+            },
+            callback: {
+              id: 'cb_1',
+              customerName: 'Sam Taylor',
+              phone: '0400 111 222',
+              reason: 'Confirm quote and repair timing',
+              status: 'queued',
+              dueAt: 'Today 2:00 PM',
+            },
+            updatedAt: '2026-04-15 09:30',
+          },
+        ],
+        callbacks: [
+          {
+            id: 'cb_1',
+            customerName: 'Sam Taylor',
+            phone: '0400 111 222',
+            reason: 'Confirm quote and repair timing',
+            status: 'queued',
+            dueAt: 'Today 2:00 PM',
+          },
+        ],
+        experiments: [
+          {
+            name: 'Quote anchor test',
+            variant: 'control',
+            exposure: '48%',
+            lift: '+2.1%',
+            sampleSize: 84,
+          },
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderRoute('/');
+
+    await user.type(screen.getByLabelText(/admin token/i), 'good-token');
+    await user.click(screen.getByRole('button', { name: /load dashboard/i }));
+
+    expect(await screen.findByRole('heading', { name: /job summaries/i })).toBeInTheDocument();
+    expect(screen.getByText(/inspect the ceiling leak and quote the roof repair/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /current quote state/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /follow-up queue/i })).toBeInTheDocument();
+    expect(screen.getByText(/quote anchor test/i)).toBeInTheDocument();
+  });
 });

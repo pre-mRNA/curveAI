@@ -558,6 +558,9 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     if (!request) {
       return undefined;
     }
+    if (request.status !== "pending" || new Date(request.expiresAt).getTime() < Date.now()) {
+      return undefined;
+    }
     const now = new Date().toISOString();
     const updated: UploadRequestRecord = {
       ...request,

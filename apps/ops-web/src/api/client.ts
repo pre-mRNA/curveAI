@@ -1,6 +1,7 @@
 import type { DashboardPayload } from '../types';
+import { resolveApiBaseUrl } from './baseUrl';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
+const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;

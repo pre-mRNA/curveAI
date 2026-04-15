@@ -1,6 +1,7 @@
 export interface ObjectStore {
   put(key: string, value: Blob | ArrayBuffer | ArrayBufferView, options?: { contentType?: string }): Promise<string>;
   get(key: string): Promise<{ blob: Blob; contentType?: string } | undefined>;
+  delete(key: string): Promise<void>;
 }
 
 export class R2ObjectStore implements ObjectStore {
@@ -22,6 +23,10 @@ export class R2ObjectStore implements ObjectStore {
       blob: await object.blob(),
       contentType: object.httpMetadata?.contentType ?? undefined,
     };
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.bucket.delete(key);
   }
 }
 
@@ -51,5 +56,9 @@ export class InMemoryObjectStore implements ObjectStore {
       blob: new Blob([buffer], { type: object.contentType }),
       contentType: object.contentType,
     };
+  }
+
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
   }
 }

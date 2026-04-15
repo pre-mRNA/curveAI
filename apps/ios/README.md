@@ -19,10 +19,10 @@ This directory contains the native SwiftUI staff app for TradieAI.
 - To point the app at a backend during local testing, set:
 
 ```text
-TRADIE_API_BASE_URL=http://localhost:3001/api
+TRADIE_API_BASE_URL=http://localhost:8787
 ```
 
-- The live client expects simple JSON endpoints for invite, OTP verification, calendar connect, voice consent, and jobs.
+- The live client currently targets the Cloudflare Worker-compatible routes for invite, OTP verification, calendar connect, voice consent, and jobs.
 - The flow is intentionally backend-compatible but still easy to swap if the contract shifts.
 
 ## Build and test

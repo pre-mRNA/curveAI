@@ -27,6 +27,37 @@ const STEPS: Array<{ id: OnboardingStep; label: string; description: string }> =
   { id: 'finalize', label: 'Finalize', description: 'Lock in the staff profile.' },
 ];
 
+const STEP_GUIDANCE: Record<OnboardingStep, { title: string; detail: string }> = {
+  consent: {
+    title: 'Check every permission before we start.',
+    detail: 'The interview only opens after all three consent boxes are checked, so nothing starts by accident.',
+  },
+  interview: {
+    title: 'Capture the first answer and keep moving.',
+    detail: 'Type the response the voice interviewer would have heard so the transcript stays aligned.',
+  },
+  review: {
+    title: 'Make the extracted profile canonical.',
+    detail: 'Fix names, services, pricing rules, and escalation details before the data moves downstream.',
+  },
+  calendar: {
+    title: 'Connect Microsoft calendar from the backend flow.',
+    detail: 'Launch the auth handoff, then return here to confirm the connection before moving on.',
+  },
+  voice_sample: {
+    title: 'Record a clean voice sample for cloning.',
+    detail: 'Use the browser microphone, keep the clip short, and avoid background noise.',
+  },
+  finalize: {
+    title: 'Confirm the handoff and close the session.',
+    detail: 'Finalize only after the calendar connection and voice sample are both complete.',
+  },
+  complete: {
+    title: 'The onboarding profile is locked.',
+    detail: 'The session is complete and the staff record is ready for the ops console.',
+  },
+};
+
 const REVIEW_FIELDS: Array<{
   key: keyof OnboardingReviewProfile;
   label: string;
@@ -151,6 +182,9 @@ export default function OnboardingPage() {
     () => Math.max(0, STEPS.findIndex((step) => step.id === currentStep)),
     [currentStep],
   );
+  const activeStep = STEPS[activeStepIndex] ?? STEPS[0];
+  const nextStep = STEPS[activeStepIndex + 1];
+  const activeStepGuide = STEP_GUIDANCE[currentStep];
 
   const transcript = session?.transcript ?? [];
   const readyToFinalize = Boolean(session?.calendarConnected && session?.voiceSampleUploaded);
@@ -645,7 +679,8 @@ export default function OnboardingPage() {
           <h1>Structured voice onboarding for tradies.</h1>
           <p>
             Invite code <code>{inviteCode}</code> opens a secure session for consent, interview, extraction review,
-            Microsoft calendar connect, voice sample capture, and finalization.
+            Microsoft calendar connect, voice sample capture, and finalization. The flow remembers progress on this
+            device so it can be resumed without losing context.
           </p>
           <div className="meta-row">
             <span className="pill accent">Step {activeStepIndex + 1} of {STEPS.length}</span>
@@ -653,6 +688,26 @@ export default function OnboardingPage() {
             {session?.id ? <span className="pill">Session {session.id}</span> : null}
           </div>
         </header>
+
+        <div className="card stage-card">
+          <div className="card-inner stage-card-inner">
+            <div className="stage-copy">
+              <div className="eyebrow">Current stage</div>
+              <h2>{activeStepGuide.title}</h2>
+              <p className="muted">{activeStepGuide.detail}</p>
+            </div>
+            <div className="stage-meta">
+              <div className="stage-metric">
+                <span className="muted">Focus now</span>
+                <strong>{activeStep.label}</strong>
+              </div>
+              <div className="stage-metric">
+                <span className="muted">Next up</span>
+                <strong>{nextStep?.label ?? 'Complete'}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className="stepper" aria-label="Onboarding steps">
           {STEPS.map((step, index) => (

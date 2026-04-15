@@ -39,6 +39,17 @@ Use these as the deployment contract for the Worker:
 Microsoft and Twilio secrets stay optional in staging until those integrations are enabled.
 When they are added later, keep them server-side only and wire them through the Worker, not the browser.
 
+Use these as the deployment contract for each Pages app:
+
+- `VITE_API_BASE_URL` - absolute Worker origin compiled into the app bundle
+
+The Pages apps no longer rely on `/api` same-origin behavior in production.
+Their build scripts will warn locally when `VITE_API_BASE_URL` is missing and should fail in Pages or strict builds.
+
+Use this env var for migration and deploy scripts:
+
+- `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
+
 ## Why This Replaces Fly
 
 The earlier staging shape used Fly for the API because the app was still an Express server with local persistence.
@@ -64,6 +75,8 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 
 - The repo now includes a dedicated Worker app at `apps/edge-api`.
 - Use `npm run dev:edge-api` for the Cloudflare-targeted API, `npm run dev:web` for onboarding, `npm run dev:ops-web` for the internal dashboard, and `npm run dev:upload-web` for the customer upload flow.
+- For local Pages builds, set `VITE_API_BASE_URL=http://127.0.0.1:8787`.
+- For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
 - Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
 - Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.
@@ -72,5 +85,6 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 
 - Static Pages alone is not enough for this product.
 - The deployment target is Cloudflare-only, and the repo now includes Worker implementations for health, dashboard auth, browser onboarding, Microsoft callback handling, upload token/photo flows, signed photo assets, and the current voice tool endpoints including post-call ingestion.
+- `/health` now reports worker readiness warnings when required public URLs or signing secrets are missing, and non-local requests fail fast when the worker is misconfigured.
 - The Express app remains a local reference, but the Cloudflare route surface is now the primary staging path for onboarding, ops, and customer uploads.
 - Keep core business logic portable so the worker runtime can be swapped or self-hosted later if needed.

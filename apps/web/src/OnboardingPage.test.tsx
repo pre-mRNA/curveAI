@@ -23,6 +23,10 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function matchesApiPath(pathname: string, path: string) {
+  return pathname === path || pathname === `/api${path}`;
+}
+
 function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'sess_1',
@@ -126,7 +130,7 @@ describe('onboarding route', () => {
       const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
       const method = init?.method ?? 'GET';
 
-      if (url.pathname === '/api/onboarding/sessions/start' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
         return jsonResponse({
           session: backendSession({
             status: 'pending',
@@ -137,20 +141,20 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/token' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/token') && method === 'POST') {
         return jsonResponse({
           session: backendSession(),
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1' && method === 'GET') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1') && method === 'GET') {
         return jsonResponse({
           session: backendSession(),
           checklist: [],
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/turns' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/turns') && method === 'POST') {
         return jsonResponse({
           session: backendSession({
             turns: [
@@ -176,7 +180,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/next-question' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/next-question') && method === 'POST') {
         return jsonResponse({
           nextQuestion: {
             id: 'pricing',
@@ -188,7 +192,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'GET') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/review') && method === 'GET') {
         return jsonResponse({
           review: backendSession().review,
           analysis: backendSession().analysis,
@@ -196,7 +200,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/review') && method === 'POST') {
         savedReviewPayload = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         return jsonResponse({
           session: backendSession({
@@ -221,7 +225,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/calendar/microsoft/start' && method === 'GET') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/calendar/microsoft/start') && method === 'GET') {
         return jsonResponse({
           calendar: {
             provider: 'microsoft',
@@ -267,7 +271,7 @@ describe('onboarding route', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/onboarding/sessions/sess_1/turns'),
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/turns$/),
         expect.objectContaining({ method: 'POST' }),
       );
     });
@@ -372,7 +376,7 @@ describe('onboarding route', () => {
       const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
       const method = init?.method ?? 'GET';
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1' && method === 'GET') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1') && method === 'GET') {
         return jsonResponse({
           session: backendSession({
             status: 'voice_sample',
@@ -403,7 +407,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'GET') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/review') && method === 'GET') {
         return jsonResponse({
           review: backendSession().review,
           analysis: backendSession().analysis,
@@ -411,7 +415,7 @@ describe('onboarding route', () => {
         });
       }
 
-      if (url.pathname === '/api/onboarding/sessions/sess_1/voice-sample' && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/voice-sample') && method === 'POST') {
         const formData = init?.body as FormData;
         uploadedDuration = String(formData.get('durationSeconds'));
         const sample = formData.get('sample');
@@ -466,7 +470,7 @@ describe('onboarding route', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/onboarding/sessions/sess_1/voice-sample'),
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/voice-sample$/),
         expect.objectContaining({ method: 'POST' }),
       );
     });

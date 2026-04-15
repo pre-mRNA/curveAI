@@ -1,14 +1,15 @@
 :root {
   color-scheme: light;
-  --bg: #f4f0e8;
-  --panel: rgba(255, 255, 255, 0.82);
+  --bg: #f3eee6;
+  --panel: rgba(255, 255, 255, 0.86);
   --panel-solid: #ffffff;
-  --text: #1c2026;
-  --muted: #5f6976;
-  --accent: #2c6f8e;
-  --accent-2: #d97757;
-  --line: rgba(28, 32, 38, 0.12);
-  --shadow: 0 18px 45px rgba(28, 32, 38, 0.12);
+  --text: #18212a;
+  --muted: #5a6672;
+  --accent: #1f677f;
+  --accent-2: #c96542;
+  --accent-soft: rgba(31, 103, 127, 0.12);
+  --line: rgba(24, 33, 42, 0.1);
+  --shadow: 0 18px 50px rgba(24, 33, 42, 0.12);
 }
 
 * {
@@ -25,14 +26,22 @@ body,
 body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(44, 111, 142, 0.15), transparent 30%),
-    radial-gradient(circle at top right, rgba(217, 119, 87, 0.16), transparent 26%),
-    linear-gradient(180deg, #faf7f1 0%, #f2ede5 100%);
+    radial-gradient(circle at top left, rgba(31, 103, 127, 0.15), transparent 28%),
+    radial-gradient(circle at top right, rgba(201, 101, 66, 0.14), transparent 24%),
+    linear-gradient(180deg, #f9f5ef 0%, #f1ebe2 100%);
   color: var(--text);
+  line-height: 1.5;
 }
 
 a {
   color: inherit;
+}
+
+code {
+  padding: 0.14rem 0.38rem;
+  border-radius: 0.45rem;
+  background: rgba(31, 103, 127, 0.08);
+  color: var(--accent);
 }
 
 button,
@@ -53,7 +62,7 @@ input[type='password'] {
 
 input[type='text']:focus,
 input[type='password']:focus {
-  outline: 2px solid rgba(44, 111, 142, 0.28);
+  outline: 2px solid rgba(31, 103, 127, 0.24);
   outline-offset: 2px;
 }
 
@@ -69,7 +78,7 @@ textarea {
 }
 
 textarea:focus {
-  outline: 2px solid rgba(44, 111, 142, 0.28);
+  outline: 2px solid rgba(31, 103, 127, 0.24);
   outline-offset: 2px;
 }
 
@@ -81,18 +90,18 @@ input[type='checkbox'] {
 
 .shell {
   min-height: 100vh;
-  padding: 24px;
+  padding: clamp(16px, 2vw, 28px);
 }
 
 .container {
-  width: min(1240px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto;
 }
 
 .hero {
   display: grid;
-  gap: 12px;
-  padding: 24px 0 28px;
+  gap: 14px;
+  padding: 24px 0 20px;
 }
 
 .eyebrow {
@@ -113,6 +122,7 @@ input[type='checkbox'] {
   margin: 0;
   color: var(--muted);
   max-width: 70ch;
+  line-height: 1.55;
 }
 
 .topbar {
@@ -171,7 +181,7 @@ input[type='checkbox'] {
 }
 
 .card-inner {
-  padding: 18px;
+  padding: 20px;
 }
 
 .card h2,
@@ -238,6 +248,7 @@ input[type='checkbox'] {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
 }
 
 .photo-row {
@@ -306,6 +317,7 @@ input[type='checkbox'] {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .auth-message {
@@ -388,6 +400,10 @@ input[type='checkbox'] {
   cursor: pointer;
   color: white;
   background: linear-gradient(135deg, var(--accent), #245b73);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
 }
 
 .button.secondary {
@@ -419,8 +435,8 @@ input[type='checkbox'] {
 
 .onboarding-shell {
   background:
-    radial-gradient(circle at top left, rgba(44, 111, 142, 0.14), transparent 26%),
-    radial-gradient(circle at bottom right, rgba(217, 119, 87, 0.12), transparent 22%);
+    radial-gradient(circle at top left, rgba(31, 103, 127, 0.14), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(201, 101, 66, 0.12), transparent 22%);
 }
 
 .onboarding-layout {
@@ -430,6 +446,82 @@ input[type='checkbox'] {
 
 .onboarding-hero {
   padding-bottom: 8px;
+}
+
+.landing-shell .landing-hero {
+  padding-bottom: 12px;
+}
+
+.landing-step-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.landing-step-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(24, 33, 42, 0.08);
+  background:
+    linear-gradient(180deg, rgba(31, 103, 127, 0.05), rgba(255, 255, 255, 0.92)),
+    var(--panel-solid);
+}
+
+.landing-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.invite-entry-form {
+  display: grid;
+  gap: 14px;
+}
+
+.invite-entry-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.stage-card {
+  overflow: hidden;
+}
+
+.stage-card-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.stage-copy h2 {
+  margin-bottom: 8px;
+}
+
+.stage-meta {
+  display: grid;
+  gap: 12px;
+}
+
+.stage-metric {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(24, 33, 42, 0.08);
+}
+
+.stage-metric strong {
+  font-size: 1.05rem;
 }
 
 .stepper {
@@ -518,6 +610,7 @@ input[type='checkbox'] {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .transcript-stack {
@@ -542,6 +635,8 @@ input[type='checkbox'] {
 .review-grid {
   display: grid;
   gap: 14px;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: start;
 }
 
 .review-checklist {
@@ -625,6 +720,18 @@ input[type='checkbox'] {
   }
 
   .stepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stage-card-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-grid {
     grid-template-columns: 1fr;
   }
 
@@ -650,5 +757,31 @@ input[type='checkbox'] {
 
   .snapshot-grid {
     grid-template-columns: 1fr;
+  }
+
+  .conversation-header {
+    align-items: flex-start;
+  }
+
+  .step {
+    padding: 12px;
+    min-width: 0;
+  }
+
+  .step .muted {
+    display: none;
+  }
+
+  .stage-copy p {
+    display: none;
+  }
+
+  .invite-entry-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .invite-entry-row .button {
+    width: 100%;
   }
 }

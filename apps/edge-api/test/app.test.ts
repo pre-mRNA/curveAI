@@ -37,9 +37,12 @@ function createTestApp(overrides: Partial<EdgeApiEnv> = {}) {
 }
 
 async function automationHeaders(secret: string, body: unknown): Promise<HeadersInit> {
+  return automationHeadersForRawBody(secret, JSON.stringify(body));
+}
+
+async function automationHeadersForRawBody(secret: string, rawBody: string): Promise<HeadersInit> {
   const timestamp = Date.now().toString();
-  const payload = JSON.stringify(body);
-  const signature = await signHmacSha256(secret, `${timestamp}.${payload}`);
+  const signature = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
   return {
     "Content-Type": "application/json",
     "X-Curve-Timestamp": timestamp,
@@ -200,15 +203,47 @@ test("health reports worker runtime and provider modes", async () => {
   const response = await app.request("/health");
   assert.equal(response.status, 200);
   const body = (await response.json()) as {
+    ok: boolean;
+    ready: boolean;
     runtime: string;
     realtimeVoice: string;
     reasoning: string;
     calendar: string;
+    warnings: string[];
   };
+  assert.equal(body.ok, true);
+  assert.equal(body.ready, true);
   assert.equal(body.runtime, "cloudflare-worker");
   assert.equal(body.realtimeVoice, "mock");
   assert.equal(body.reasoning, "mock");
   assert.equal(body.calendar, "mock");
+  assert.deepEqual(body.warnings, []);
+});
+
+test("non-local requests fail fast when worker config is incomplete", async () => {
+  const app = createApp({
+    env: {
+      ADMIN_TOKEN: "admin-secret",
+    },
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  const response = await app.request("https://curve-ai-api-staging.workers.dev/dashboard", {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+
+  assert.equal(response.status, 503);
+  const body = (await response.json()) as {
+    error: {
+      details?: {
+        issues?: string[];
+      };
+    };
+  };
+  assert.ok(body.error.details?.issues?.some((issue) => issue.includes("PUBLIC_API_URL")));
 });
 
 test("worker blocks realtime session issuance without both consents", async () => {
@@ -384,6 +419,45 @@ test("voice post-call writes call records into the Worker CRM store", async () =
   };
   assert.equal(jobCard.card.calls.length, 1);
   assert.equal(jobCard.card.calls[0]?.id, "call_123");
+});
+
+test("voice post-call rejects malformed JSON with a clean 400", async () => {
+  const app = createTestApp();
+  const rawBody = "{\"callId\":";
+  const headers = await automationHeadersForRawBody("automation-secret", rawBody);
+
+  const response = await app.request("/voice/post-call", {
+    method: "POST",
+    headers,
+    body: rawBody,
+  });
+
+  assert.equal(response.status, 400);
+});
+
+test("expired upload tokens are rejected on both read and write routes", async () => {
+  const repo = new InMemoryOnboardingRepository();
+  const expiredRequest = await repo.createUploadRequest({
+    token: "expired-token",
+    jobId: "job_expired",
+    uploadLink: "https://curve-ai-upload.pages.dev/upload/expired-token",
+    expiresAt: "2020-01-01T00:00:00.000Z",
+  });
+  await repo.completeUploadRequest(expiredRequest.token, []);
+  const app = createApp({
+    env: baseEnv(),
+    repo,
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  const getResponse = await app.request(`/uploads/${expiredRequest.token}`);
+  assert.equal(getResponse.status, 410);
+
+  const postResponse = await app.request(`/uploads/${expiredRequest.token}/photos`, {
+    method: "POST",
+    body: new FormData(),
+  });
+  assert.equal(postResponse.status, 410);
 });
 
 test("staff invite verification and staff-scoped job access work on the Worker", async () => {

@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "migrate:d1:local": "node ../../scripts/run-d1-migrations.mjs --local",
+    "migrate:d1:remote": "node ../../scripts/run-d1-migrations.mjs --remote",
+    "deploy": "npm run migrate:d1:remote && wrangler deploy",
     "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -1432,6 +1432,21 @@ export class D1OnboardingRepository implements OnboardingRepository {
     if (!request) {
       return undefined;
     }
+    if (request.status !== "pending" || new Date(request.expiresAt).getTime() < Date.now()) {
+      return undefined;
+    }
+    const nextFileCount = request.fileCount + photos.length;
+    const updateResult = await this.db
+      .prepare(
+        `UPDATE crm_upload_requests
+         SET status = ?, completed_at = ?, file_count = ?
+         WHERE token = ? AND status = ? AND expires_at > ?`,
+      )
+      .bind("completed", now, nextFileCount, token, "pending", now)
+      .run();
+    if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
+      return undefined;
+    }
     for (const photo of photos) {
       await this.db
         .prepare(
@@ -1454,17 +1469,9 @@ export class D1OnboardingRepository implements OnboardingRepository {
       ...request,
       status: "completed",
       completedAt: now,
-      fileCount: request.fileCount + photos.length,
+      fileCount: nextFileCount,
       files: [...request.files, ...photos],
     };
-    await this.db
-      .prepare(
-        `UPDATE crm_upload_requests
-         SET status = ?, completed_at = ?, file_count = ?
-         WHERE token = ?`,
-      )
-      .bind("completed", now, updatedRequest.fileCount, token)
-      .run();
 
     const job = await this.getJobById(request.jobId);
     if (job) {

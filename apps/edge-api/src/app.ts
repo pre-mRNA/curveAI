@@ -141,6 +141,19 @@ function parseJsonBody(rawBody: string): unknown | undefined {
   }
 }
 
+function isExpiredUploadRequest(upload: { expiresAt: string }): boolean {
+  return new Date(upload.expiresAt).getTime() < Date.now();
+}
+
+function isLocalRequest(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function getSignedAssetSecret(config: ReturnType<typeof getConfig>): string {
   if (!config.photoAccessSecret) {
     throw new Error("Photo access signing secret is not configured");
@@ -384,9 +397,26 @@ export function createApp(options?: {
 
   app.use("*", cors({
     origin: config.allowedOrigins.length === 1 ? config.allowedOrigins[0] : config.allowedOrigins,
-    allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Onboarding-Token", "X-Curve-Signature", "X-Curve-Timestamp"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Staff-Session", "X-Onboarding-Token", "X-Curve-Signature", "X-Curve-Timestamp"],
     allowMethods: ["GET", "POST", "OPTIONS"],
   }));
+
+  app.use("*", async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    if (c.req.path === "/health") {
+      await next();
+      return;
+    }
+    if (config.warnings.length > 0 && !isLocalRequest(c.req.url)) {
+      return jsonError(c, 503, "Worker configuration is incomplete", {
+        issues: config.warnings,
+      });
+    }
+    await next();
+  });
 
   app.onError((error, c) => {
     if (error instanceof OnboardingRuleError) {
@@ -456,11 +486,13 @@ export function createApp(options?: {
 
   app.get("/health", (c) =>
     c.json({
-      ok: true,
+      ok: config.warnings.length === 0,
+      ready: config.warnings.length === 0,
       runtime: "cloudflare-worker",
       realtimeVoice: providers.realtimeVoice.mode,
       reasoning: providers.reasoning.mode,
       calendar: providers.calendar.mode,
+      warnings: config.warnings,
     }),
   );
 
@@ -974,11 +1006,11 @@ export function createApp(options?: {
     if (!upload) {
       return jsonError(c, 404, "Upload request not found", { token });
     }
+    if (isExpiredUploadRequest(upload)) {
+      return jsonError(c, 410, "Upload request has expired", { token });
+    }
     if (upload.status !== "pending") {
       return jsonError(c, 409, "This upload request has already been completed", { token });
-    }
-    if (new Date(upload.expiresAt).getTime() < Date.now()) {
-      return jsonError(c, 410, "Upload request has expired", { token });
     }
 
     const formData = await c.req.formData();
@@ -1018,7 +1050,20 @@ export function createApp(options?: {
 
     const completed = await repo.completeUploadRequest(token, storedPhotos);
     if (!completed) {
-      return jsonError(c, 404, "Upload request not found", { token });
+      await Promise.all(
+        storedPhotos
+          .map((photo) => photo.objectKey)
+          .filter((objectKey): objectKey is string => Boolean(objectKey))
+          .map((objectKey) => objectStore.delete(objectKey)),
+      );
+      const latest = await repo.getUploadRequest(token);
+      if (!latest) {
+        return jsonError(c, 404, "Upload request not found", { token });
+      }
+      if (isExpiredUploadRequest(latest) || latest.status === "expired") {
+        return jsonError(c, 410, "Upload request has expired", { token });
+      }
+      return jsonError(c, 409, "This upload request has already been completed", { token });
     }
 
     return c.json({
@@ -1035,7 +1080,7 @@ export function createApp(options?: {
     if (!upload) {
       return jsonError(c, 404, "Upload request not found", { token });
     }
-    if (upload.status === "expired") {
+    if (isExpiredUploadRequest(upload) || upload.status === "expired") {
       return jsonError(c, 410, "Upload request has expired", { token });
     }
     return c.json({
@@ -1388,7 +1433,11 @@ export function createApp(options?: {
       return jsonError(c, 401, "Automation signature did not match");
     }
 
-    const parsed = parseValidation(voicePostCallInputSchema, rawBody ? JSON.parse(rawBody) : {});
+    const body = parseJsonBody(rawBody);
+    if (body === undefined) {
+      return jsonError(c, 400, "Invalid JSON body");
+    }
+    const parsed = parseValidation(voicePostCallInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
     }

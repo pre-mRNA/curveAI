@@ -11,6 +11,7 @@ import type {
   OnboardingTurnPayload,
   VoiceSampleUploadResponse,
 } from '../types';
+import { resolveApiBaseUrl } from './baseUrl';
 import type {
   ChecklistItem as BackendCoverageItem,
   ExtractionReview as BackendReview,
@@ -25,7 +26,7 @@ import type {
   SupervisorPrompt as BackendSupervisorPrompt,
 } from '../../../../packages/shared/src/onboarding';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
+const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;
