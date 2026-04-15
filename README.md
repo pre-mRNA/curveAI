@@ -6,10 +6,12 @@ Curve AI is a greenfield platform for tradie-focused voice agents, dynamic quoti
 
 The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
 Cloudflare deployment guidance for the onboarding app is in [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md).
+The current deployment target is Cloudflare Pages for the web app plus a Cloudflare Worker API, replacing the earlier Fly-hosted staging shape.
 
 ## Workspace
 
-- `apps/api`: voice-control API, lightweight CRM backend, uploads, browser onboarding endpoints, and portable provider adapters
+- `apps/api`: existing Express API scaffold for voice-control routes, lightweight CRM behavior, uploads, and local development reference
+- `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, D1/R2/DO bindings, and Worker-native provider adapters
 - `apps/web`: internal ops console, browser staff onboarding, and customer photo upload flow
 - `apps/ios`: native SwiftUI staff app
 - `packages/shared`: shared domain models, onboarding contracts, and pricing logic
@@ -19,11 +21,13 @@ Cloudflare deployment guidance for the onboarding app is in [docs/cloudflare-dep
 
 1. Put local secrets in the untracked `secrets` file or copy `secrets.local.env.example` to `secrets.local.env`.
 2. Install workspace dependencies with `npm install`.
-3. Start the API with `npm run dev:api`.
-4. Start the web console with `npm run dev:web`.
-5. Open the iOS app from `apps/ios/TradieAI.xcodeproj`.
-6. Run backend tests with `npm run test:api`.
-7. Run web tests with `npm run test -w @curve-ai/web`.
+3. Start the Express reference API with `npm run dev:api` if you need the older local stack.
+4. Start the Cloudflare Worker API with `npm run dev:edge-api` for the current deployment target.
+5. Start the web console with `npm run dev:web`.
+6. Open the iOS app from `apps/ios/TradieAI.xcodeproj`.
+7. Run Express API tests with `npm run test:api`.
+8. Run Worker API tests with `npm run test:edge-api`.
+9. Run web tests with `npm run test -w @curve-ai/web`.
 
 ## Auth Model
 
@@ -45,6 +49,7 @@ Cloudflare deployment guidance for the onboarding app is in [docs/cloudflare-dep
 
 - `npm run typecheck`
 - `npm run build`
+- `npm run test:edge-api`
 - `npm run test:api`
 - `npm run test -w @curve-ai/web`
 - `xcodebuild -list -project apps/ios/TradieAI.xcodeproj`

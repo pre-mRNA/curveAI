@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "curve-ai-api-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-15",
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "curve-ai-staging",
+      "database_id": "replace-in-cloudflare-dashboard"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS_BUCKET",
+      "bucket_name": "curve-ai-staging-artifacts"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ONBOARDING_SESSIONS",
+        "class_name": "OnboardingSessionCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OnboardingSessionCoordinator"]
+    }
+  ],
+  "vars": {
+    "PUBLIC_APP_URL": "https://curve-ai-staging.pages.dev",
+    "PUBLIC_API_URL": "https://curve-ai-api-staging.workers.dev",
+    "ALLOWED_ORIGIN": "https://curve-ai-staging.pages.dev",
+    "REASONING_PROVIDER": "heuristic"
+  }
+}

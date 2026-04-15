@@ -2,46 +2,71 @@
 
 ## Recommendation
 
-Use `Cloudflare Pages + Workers`, not static Pages alone.
+Deploy the web app on `Cloudflare Pages` and the backend on a separate `Cloudflare Worker` API.
+Do not treat this app as "static Pages only". The product needs server-side secrets, signed session issuance, OAuth callbacks, upload validation, and session/state coordination.
 
-Static Pages by themselves are not enough for this app because onboarding needs:
+## Target Topology
 
-- server-held secrets for ElevenLabs and Microsoft
-- signed/browser session issuance
-- OAuth callback handling
-- multipart audio upload handling
-- token validation and invite/session gating
+- `Pages` hosts the browser app for onboarding and the internal web UI.
+- `Workers` hosts the API surface, including onboarding, health, uploads, provider glue, and admin-only routes.
+- `D1` stores durable relational state for staff, invites, onboarding sessions, jobs, quotes, uploads, and provider metadata.
+- `R2` stores photos, voice samples, and other artifacts.
+- `Durable Objects` coordinate live onboarding sessions and any turn-order sensitive flow.
+- `Cloudflare Access` protects staging so the deployment stays internal-only.
 
-## Best Fit For This Repo
+## Canonical Bindings And Env Vars
 
-- `Pages` serves the React onboarding app and internal web UI.
-- `Workers` or `Pages Functions` handle lightweight edge concerns:
-  - invite/session bootstrap
-  - ElevenLabs signed session issuance
-  - Microsoft OAuth callback entrypoints
-  - upload-token validation
-- The core orchestration API should remain portable and self-hostable in Australia.
+Use these as the deployment contract for the Worker:
 
-That means the practical shape is:
+- `DB` - D1 binding for primary records
+- `ARTIFACTS_BUCKET` - R2 binding for uploads and voice artifacts
+- `ONBOARDING_SESSIONS` - Durable Object namespace for live interview coordination
+- `PUBLIC_APP_URL` - Pages origin
+- `PUBLIC_API_URL` - Worker origin
+- `ALLOWED_ORIGIN` - CORS allowlist entry for the Pages origin
+- `ADMIN_TOKEN` - admin auth for internal routes
+- `AUTOMATION_SHARED_SECRET` - HMAC secret for automation and voice routes
+- `ELEVENLABS_API_KEY` - ElevenLabs provider key
+- `ELEVENLABS_AGENT_ID` - ElevenLabs browser agent identifier
+- `REASONING_PROVIDER` - `mock`, `hosted`, or `openai-compatible`
+- `REASONING_BASE_URL` - base URL for the portable reasoning endpoint
+- `REASONING_API_KEY` - API key for the reasoning provider
 
-1. Cloudflare hosts the web surface.
-2. Edge code handles low-latency request/auth glue.
-3. The stateful control plane and provider orchestration can later move to Australian infrastructure without rewriting the frontend.
+Microsoft and Twilio secrets stay optional in staging until those integrations are enabled.
+When they are added later, keep them server-side only and wire them through the Worker, not the browser.
 
-## Why Not Static-Only
+## Why This Replaces Fly
 
-Static-only hosting would force secrets, OAuth verification, and provider callbacks somewhere else anyway. Once that is true, the app is no longer really “static.” For this product, `static UI + worker-backed APIs` is the correct minimum Cloudflare shape.
+The earlier staging shape used Fly for the API because the app was still an Express server with local persistence.
+Cloudflare-native hosting removes that dependency:
 
-## Relation To The Existing Example
+- `Pages` replaces the static frontend hosting role.
+- `Workers` replaces the Node API hosting role.
+- `D1` replaces the file-backed state layer.
+- `R2` replaces local upload storage.
+- `Durable Objects` replace the need for a long-lived Node process for live onboarding coordination.
 
-The pattern in `/Users/ajsethi/long-read-splicing-modulation/experiments/cloudflare` is the right general model:
+This is a real platform shift, not a config-only swap.
+The implementation work is a Worker rewrite of the API boundary, but the deployment docs now treat Cloudflare as the target runtime and Fly as deprecated for this repo.
 
-- build static assets for the frontend
-- attach a Worker for protected API routes
-- keep secrets and provider calls server-side
+## Staging Shape
 
-For Curve AI, the same pattern fits, but the long-term recommendation is stricter:
+- Staging should be internal-only behind Cloudflare Access.
+- Use a dedicated Pages project for the UI and a separate Worker route for the API.
+- Keep provider callbacks and signed upload endpoints reachable through the API origin, but still state-bound and token-checked.
+- Keep `PUBLIC_APP_URL` and `PUBLIC_API_URL` explicit so the browser never depends on same-origin assumptions.
 
-- keep Cloudflare as the browser and edge layer
-- keep the orchestration core portable
-- avoid baking core business logic too deeply into a Cloudflare-only runtime
+## Local Development
+
+- The repo now includes a dedicated Worker app at `apps/edge-api`.
+- Use `npm run dev:edge-api` for the Cloudflare-targeted API and `npm run dev:web` for the browser UI.
+- Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
+- Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
+- Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.
+
+## Notes
+
+- Static Pages alone is not enough for this product.
+- The deployment target is Cloudflare-only, and the repo now includes a first Worker implementation for health, dashboard auth, browser onboarding, Microsoft callback handling, and voice sample uploads.
+- Remaining route families such as photo-upload token flows and the broader voice/staff/job control plane still need to be migrated off the Express reference API.
+- Keep core business logic portable so the worker runtime can be swapped or self-hosted later if needed.

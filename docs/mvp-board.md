@@ -4,7 +4,7 @@
 
 - Provider adapters: replace mock ElevenLabs browser, Microsoft calendar, and Twilio behavior with live clients behind the existing onboarding and voice routes.
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
-- Cloudflare deployment: serve the web UI from Pages, use Workers/Functions for secure edge routes, and keep the control plane portable rather than collapsing the backend into static hosting assumptions.
+- Cloudflare deployment: finish migrating the remaining Express-only route families onto the new Worker API so staging can drop Fly completely.
 - Security hardening: add content sniffing for uploads and move from file-backed CRM persistence to a real database.
 
 ## Next
@@ -24,6 +24,8 @@
 - Replaced the iOS tab scaffold with a step-based onboarding flow, a live/mock API client seam, and XCTest coverage for the onboarding state machine.
 - Added browser-first onboarding with shared contracts, secure invite sessions, consent-gated realtime voice provisioning, extraction review, Microsoft connect, and multipart voice sample upload.
 - Added backend guardrails so onboarding cannot mint a realtime session without consent or finalize without a connected calendar and a real audio sample.
+- Documented the Cloudflare-only deployment target, binding model, staging topology, and the migration away from Fly in the persistent project docs.
+- Added a buildable Cloudflare Worker package with Hono routing, D1/R2/DO bindings, live/mock ElevenLabs browser-session issuance, onboarding route parity for the web flow, and Worker tests covering the finalized onboarding path.
 
 ## Review Queue
 

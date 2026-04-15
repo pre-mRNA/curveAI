@@ -9,7 +9,9 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev:api": "npm run dev -w @curve-ai/api",
+    "dev:edge-api": "npm run dev -w @curve-ai/edge-api",
     "dev:web": "npm run dev -w @curve-ai/web",
+    "test:edge-api": "npm run test -w @curve-ai/edge-api",
     "test:api": "npm run test -w @curve-ai/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

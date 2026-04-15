@@ -4,14 +4,14 @@
 
 ### Platform Summary
 
-- Build a greenfield platform with four surfaces: ElevenLabs/Twilio phone agents, an AWS Sydney control plane plus lightweight CRM, a native SwiftUI staff iOS app, and an internal web ops console.
-- Each staff member gets a dedicated Twilio number, dedicated ElevenLabs agent, personal cloned voice, Outlook calendar connection, pricing profile, and experiment assignments.
-- Core v1 actions: answer calls broadly with guardrails, give indicative or guardrailed dynamic quotes, book Outlook appointments, text secure photo-upload links, create callback tasks, summarize jobs for tradies, and end calls cleanly with ElevenLabs `end_call`.
+- Build a greenfield platform with four surfaces: ElevenLabs-based voice onboarding and phone agents, a Cloudflare Pages web app plus Worker API, a native SwiftUI staff iOS app, and an internal web ops console.
+- Each staff member gets a dedicated ElevenLabs agent, personal cloned voice, calendar connection, pricing profile, and experiment assignments.
+- Core v1 actions: answer calls broadly with guardrails, give indicative or guardrailed dynamic quotes, book calendar appointments, text secure photo-upload links, create callback tasks, summarize jobs for tradies, and end calls cleanly with ElevenLabs `end_call`.
 
 ### Implementation Summary
 
-- Backend: TypeScript API plus worker-friendly service boundaries, Postgres-ready CRM model, local disk fallbacks for uploads, and n8n reserved for secondary automations.
-- Voice: ElevenLabs + Twilio per-staff agents with webhook-driven context, quote tools, booking tools, photo-link tools, callback tools, and post-call ingestion.
+- Backend: Cloudflare Worker API with D1 state, R2 artifacts, Durable Objects for live onboarding coordination, and worker-friendly service boundaries.
+- Voice: ElevenLabs per-staff agents with webhook-driven context, quote tools, booking tools, photo-link tools, callback tools, and post-call ingestion.
 - Staff onboarding: browser-first invite flow, voice-clone consent, structured interview extraction, Outlook connect, clean voice sample upload, and staff-specific routing data.
 - Pricing: base pricebook plus personalized staff pricing profiles, experiment bands, floors, ceilings, audit trails, and accepted-price tracking.
 - Surfaces: internal web ops console, customer upload page, and native SwiftUI staff app with card-style job summaries.
@@ -19,9 +19,9 @@
 ### Defaults Chosen
 
 - Launch region: Australia
-- Inbound routing: per-staff number
+- Inbound routing: per-staff number or provider-managed routing depending on deployment phase
 - Staff app auth: invite + OTP
-- Calendar model: per-staff Outlook calendars
+- Calendar model: per-staff calendars behind a provider adapter
 - Upload mode: SMS signed link
 - Escalation default: callback-first, with transfer-to-human behind a feature flag
 - Data retention: transcripts and audio retained with explicit consent controls
@@ -49,4 +49,5 @@
 - Fixed a follow-up browser regression where recorded voice samples were being scored as five-second clips regardless of actual duration, and added a web test that exercises recording -> upload -> finalize progression.
 - Pulled the onboarding session/review envelope types into `packages/shared` and switched the web client to consume those shared contracts instead of redeclaring backend DTOs locally.
 - Fixed the next review round on onboarding state integrity: onboarding session tokens now expire, completed sessions reject further mutation, configured Microsoft callbacks require a real auth code, and review identity fields now persist instead of disappearing on save.
-- Added a persistent Cloudflare deployment note recommending `Pages + Workers` for the web surface while keeping the orchestration core portable for later Australian self-hosting.
+- Added a persistent Cloudflare deployment note recommending `Pages + Worker API` for the web surface while keeping the orchestration core portable and removing Fly from the target topology.
+- Added `apps/edge-api`, a buildable Cloudflare Worker API with Hono, D1-backed repository scaffolding, R2 artifact storage, Durable Object session coordination, provider adapters, and tests for the browser onboarding happy path.
