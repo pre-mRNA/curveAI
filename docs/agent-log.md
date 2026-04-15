@@ -55,3 +55,6 @@
 - Migrated the Cloudflare Worker beyond onboarding so it now serves dashboard/job-card reads, voice quote/callback/appointment/send-photo-link tools, signed photo asset URLs, customer photo uploads, and `voice/post-call` ingestion.
 - Reworked the Worker runtime so production requests use real Cloudflare bindings instead of silently falling back to in-memory state, and updated the deployment contract/docs to use separate ops/onboarding/upload origins.
 - Added the D1 CRM migration for jobs, quotes, appointments, callbacks, calls, upload requests, and photo assets, plus Worker tests covering the Cloudflare upload flow and post-call persistence.
+- Migrated the remaining SwiftUI-facing staff session flow into the Worker: `/staff/invite`, `/staff/verify-otp`, `/staff/me`, `/staff/voice-consent`, `/staff/pricing-interview`, `/staff/calendar/connect`, and staff-scoped `/jobs` access.
+- Added Worker-side D1 models for staff auth state, staff sessions, and calendar connections, plus coverage for OTP verification and staff-scoped job access.
+- Tightened the new Worker staff invite route so raw OTPs are only exposed when `ALLOW_INSECURE_TEST_OTP=true` is explicitly enabled for non-production workflows.

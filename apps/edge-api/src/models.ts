@@ -364,6 +364,54 @@ export interface StaffProfileSummary {
   updatedAt?: string;
 }
 
+export type StaffVoiceConsentStatus = "pending" | "granted" | "revoked";
+
+export interface PricingInterviewRecord {
+  answeredAt: string;
+  responses: Record<string, unknown>;
+}
+
+export interface PricingProfileRecord {
+  baseCalloutFee: number;
+  minimumJobPrice: number;
+  hourlyRate: number;
+  rushMultiplier: number;
+  complexityMultiplier: number;
+  confidenceFloor: number;
+}
+
+export interface CalendarConnectionRecord {
+  provider: "outlook";
+  accountEmail?: string;
+  calendarId?: string;
+  timezone?: string;
+  externalConnectionId?: string;
+  connectedAt: string;
+}
+
+export interface StaffRecord extends StaffProfileSummary {
+  inviteTokenHash?: string;
+  otpCodeHash?: string;
+  otpIssuedAt?: string;
+  otpFailedAttempts?: number;
+  otpVerifiedAt?: string;
+  authExpiresAt?: string;
+  voiceConsentStatus: StaffVoiceConsentStatus;
+  voiceConsentAt?: string;
+  pricingInterview?: PricingInterviewRecord;
+  pricingProfile?: PricingProfileRecord;
+  calendarConnection?: CalendarConnectionRecord;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffSessionRecord {
+  tokenHash: string;
+  staffId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface UploadRequestRecord {
   token: string;
   jobId: string;

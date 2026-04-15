@@ -1,5 +1,6 @@
 import type {
   AppointmentRecord,
+  CalendarConnectionRecord,
   CallbackTaskRecord,
   CallRecord,
   DashboardPayload,
@@ -11,6 +12,8 @@ import type {
   JobRecord,
   QuoteRecord,
   OnboardingSessionRecord,
+  StaffRecord,
+  StaffSessionRecord,
   StaffProfileSummary,
   UploadRequestRecord,
 } from "../models.js";
@@ -76,6 +79,41 @@ export interface UploadRequestInput {
   expiresAt: string;
 }
 
+export interface StaffInviteInput {
+  staffId: string;
+  fullName: string;
+  phoneNumber?: string;
+  email?: string;
+  role?: string;
+  timezone?: string;
+  inviteTokenHash: string;
+  otpCodeHash: string;
+  otpIssuedAt: string;
+  otpFailedAttempts: number;
+  authExpiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffAuthStateInput {
+  staffId: string;
+  inviteTokenHash?: string;
+  otpCodeHash?: string;
+  otpIssuedAt?: string;
+  otpFailedAttempts?: number;
+  otpVerifiedAt?: string;
+  authExpiresAt?: string;
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export interface StaffSessionInput extends StaffSessionRecord {}
+
+export interface StaffCalendarConnectionInput extends CalendarConnectionRecord {
+  staffId: string;
+  updatedAt: string;
+}
+
 export interface OnboardingRepository {
   createInvite(invite: InviteRecord): Promise<void>;
   saveInvite(invite: InviteRecord): Promise<void>;
@@ -89,6 +127,13 @@ export interface OnboardingRepository {
   upsertStaffProfile(input: StaffProfileUpsertInput): Promise<void>;
   recordVoiceConsent(input: VoiceConsentRecordInput): Promise<void>;
   savePricingInterview(input: PricingInterviewRecordInput): Promise<void>;
+  getStaff(staffId: string): Promise<StaffRecord | undefined>;
+  findStaffByInviteTokenHash(inviteTokenHash: string): Promise<StaffRecord | undefined>;
+  saveStaffInvite(input: StaffInviteInput): Promise<StaffRecord>;
+  saveStaffAuthState(input: StaffAuthStateInput): Promise<StaffRecord | undefined>;
+  createStaffSession(input: StaffSessionInput): Promise<void>;
+  getStaffSession(tokenHash: string): Promise<StaffSessionRecord | undefined>;
+  saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord>;
   listJobs(staffId?: string): Promise<JobRecord[]>;
   getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;
   listCallbacks(staffId?: string): Promise<CallbackTaskRecord[]>;

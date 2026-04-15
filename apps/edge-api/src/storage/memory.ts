@@ -1,5 +1,6 @@
 import {
   type AppointmentRecord,
+  type CalendarConnectionRecord,
   type CallbackTaskRecord,
   type CallRecord,
   type DashboardExperiment,
@@ -11,17 +12,25 @@ import {
   type QuoteRecord,
   type InviteRecord,
   type OnboardingSessionRecord,
+  type PricingInterviewRecord,
+  type PricingProfileRecord,
+  type StaffRecord,
+  type StaffSessionRecord,
   type UploadRequestRecord,
   type StaffProfileSummary,
 } from "../models.js";
 import type {
   AppointmentUpsertInput,
+  StaffCalendarConnectionInput,
+  StaffAuthStateInput,
   CallbackUpsertInput,
   CallUpsertInput,
   JobUpsertInput,
   OnboardingRepository,
   PricingInterviewRecordInput,
   QuoteUpsertInput,
+  StaffInviteInput,
+  StaffSessionInput,
   StaffProfileUpsertInput,
   UploadRequestInput,
   VoiceConsentRecordInput,
@@ -59,6 +68,34 @@ function ensureArray<T>(value?: T[] | null): T[] {
   return Array.isArray(value) ? value : [];
 }
 
+function derivePricingProfile(responses: Record<string, unknown>): PricingProfileRecord {
+  const numeric = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+  return {
+    baseCalloutFee: numeric(responses.baseCalloutFee, 180),
+    minimumJobPrice: numeric(responses.minimumJobPrice, 160),
+    hourlyRate: numeric(responses.hourlyRate, 145),
+    rushMultiplier: numeric(responses.rushMultiplier, 1.35),
+    complexityMultiplier: numeric(responses.complexityMultiplier, 1.2),
+    confidenceFloor: numeric(responses.confidenceFloor, 0.68),
+  };
+}
+
+function toStaffSummary(staff: StaffRecord): StaffProfileSummary {
+  return {
+    id: staff.id,
+    fullName: staff.fullName,
+    phoneNumber: staff.phoneNumber,
+    email: staff.email,
+    role: staff.role,
+    timezone: staff.timezone,
+    companyName: staff.companyName,
+    calendarProvider: staff.calendarProvider,
+    outlookCalendarId: staff.calendarConnection?.calendarId,
+    voiceCloneId: staff.voiceCloneId,
+    updatedAt: staff.updatedAt,
+  };
+}
+
 function toDashboardConfidence(confidence: number): DashboardPayload["jobs"][number]["quote"]["confidence"] {
   if (confidence >= 0.84) {
     return "high";
@@ -93,7 +130,8 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   private readonly calls = new Map<string, CallRecord>();
   private readonly uploadRequests = new Map<string, UploadRequestRecord>();
   private readonly photos = new Map<string, JobPhoto>();
-  private readonly staffProfiles = new Map<string, StaffProfileSummary>();
+  private readonly staffRecords = new Map<string, StaffRecord>();
+  private readonly staffSessions = new Map<string, StaffSessionRecord>();
 
   async createInvite(invite: InviteRecord): Promise<void> {
     this.invites.set(invite.id, clone(invite));
@@ -146,21 +184,160 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   }
 
   async upsertStaffProfile(input: StaffProfileUpsertInput): Promise<void> {
-    this.staffProfiles.set(input.staffId, {
+    const existing = this.staffRecords.get(input.staffId);
+    this.staffRecords.set(input.staffId, {
       id: input.staffId,
       fullName: input.fullName,
-      phoneNumber: input.phoneNumber,
-      email: input.email,
-      role: input.role,
-      timezone: input.timezone,
-      companyName: input.companyName,
-      calendarProvider: input.calendarProvider,
+      phoneNumber: input.phoneNumber ?? existing?.phoneNumber,
+      email: input.email ?? existing?.email,
+      role: input.role ?? existing?.role,
+      timezone: input.timezone ?? existing?.timezone,
+      companyName: input.companyName ?? existing?.companyName,
+      calendarProvider: input.calendarProvider ?? existing?.calendarProvider,
+      outlookCalendarId: existing?.outlookCalendarId,
+      voiceCloneId: existing?.voiceCloneId,
+      inviteTokenHash: existing?.inviteTokenHash,
+      otpCodeHash: existing?.otpCodeHash,
+      otpIssuedAt: existing?.otpIssuedAt,
+      otpFailedAttempts: existing?.otpFailedAttempts ?? 0,
+      otpVerifiedAt: existing?.otpVerifiedAt,
+      authExpiresAt: existing?.authExpiresAt,
+      voiceConsentStatus: existing?.voiceConsentStatus ?? "pending",
+      voiceConsentAt: existing?.voiceConsentAt,
+      pricingInterview: existing?.pricingInterview,
+      pricingProfile: existing?.pricingProfile,
+      calendarConnection: existing?.calendarConnection,
+      createdAt: existing?.createdAt ?? input.updatedAt,
+      updatedAt: input.updatedAt,
     });
   }
 
-  async recordVoiceConsent(_input: VoiceConsentRecordInput): Promise<void> {}
+  async recordVoiceConsent(input: VoiceConsentRecordInput): Promise<void> {
+    const existing = this.staffRecords.get(input.staffId);
+    if (!existing) {
+      return;
+    }
+    this.staffRecords.set(input.staffId, {
+      ...existing,
+      voiceConsentStatus: input.consent ? "granted" : "revoked",
+      voiceConsentAt: input.capturedAt,
+      updatedAt: input.capturedAt,
+    });
+  }
 
-  async savePricingInterview(_input: PricingInterviewRecordInput): Promise<void> {}
+  async savePricingInterview(input: PricingInterviewRecordInput): Promise<void> {
+    const existing = this.staffRecords.get(input.staffId);
+    if (!existing) {
+      return;
+    }
+    const pricingInterview: PricingInterviewRecord = {
+      answeredAt: input.capturedAt,
+      responses: clone(input.responses),
+    };
+    this.staffRecords.set(input.staffId, {
+      ...existing,
+      pricingInterview,
+      pricingProfile: derivePricingProfile(input.responses),
+      updatedAt: input.capturedAt,
+    });
+  }
+
+  async getStaff(staffId: string): Promise<StaffRecord | undefined> {
+    const staff = this.staffRecords.get(staffId);
+    return staff ? clone(staff) : undefined;
+  }
+
+  async findStaffByInviteTokenHash(inviteTokenHash: string): Promise<StaffRecord | undefined> {
+    for (const staff of this.staffRecords.values()) {
+      if (staff.inviteTokenHash === inviteTokenHash) {
+        return clone(staff);
+      }
+    }
+    return undefined;
+  }
+
+  async saveStaffInvite(input: StaffInviteInput): Promise<StaffRecord> {
+    const existing = this.staffRecords.get(input.staffId);
+    const record: StaffRecord = {
+      id: input.staffId,
+      fullName: input.fullName,
+      phoneNumber: input.phoneNumber ?? existing?.phoneNumber,
+      email: input.email ?? existing?.email,
+      role: input.role ?? existing?.role,
+      timezone: input.timezone ?? existing?.timezone,
+      companyName: existing?.companyName,
+      calendarProvider: existing?.calendarProvider,
+      outlookCalendarId: existing?.outlookCalendarId,
+      voiceCloneId: existing?.voiceCloneId,
+      inviteTokenHash: input.inviteTokenHash,
+      otpCodeHash: input.otpCodeHash,
+      otpIssuedAt: input.otpIssuedAt,
+      otpFailedAttempts: input.otpFailedAttempts,
+      otpVerifiedAt: undefined,
+      authExpiresAt: input.authExpiresAt,
+      voiceConsentStatus: existing?.voiceConsentStatus ?? "pending",
+      voiceConsentAt: existing?.voiceConsentAt,
+      pricingInterview: existing?.pricingInterview,
+      pricingProfile: existing?.pricingProfile,
+      calendarConnection: existing?.calendarConnection,
+      createdAt: existing?.createdAt ?? input.createdAt,
+      updatedAt: input.updatedAt,
+    };
+    this.staffRecords.set(record.id, clone(record));
+    return clone(record);
+  }
+
+  async saveStaffAuthState(input: StaffAuthStateInput): Promise<StaffRecord | undefined> {
+    const existing = this.staffRecords.get(input.staffId);
+    if (!existing) {
+      return undefined;
+    }
+    const record: StaffRecord = {
+      ...existing,
+      inviteTokenHash: input.inviteTokenHash,
+      otpCodeHash: input.otpCodeHash,
+      otpIssuedAt: input.otpIssuedAt,
+      otpFailedAttempts: input.otpFailedAttempts ?? existing.otpFailedAttempts ?? 0,
+      otpVerifiedAt: input.otpVerifiedAt,
+      authExpiresAt: input.authExpiresAt,
+      createdAt: input.createdAt ?? existing.createdAt,
+      updatedAt: input.updatedAt,
+    };
+    this.staffRecords.set(record.id, clone(record));
+    return clone(record);
+  }
+
+  async createStaffSession(input: StaffSessionInput): Promise<void> {
+    this.staffSessions.set(input.tokenHash, clone(input));
+  }
+
+  async getStaffSession(tokenHash: string): Promise<StaffSessionRecord | undefined> {
+    const session = this.staffSessions.get(tokenHash);
+    return session ? clone(session) : undefined;
+  }
+
+  async saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord> {
+    const existing = this.staffRecords.get(input.staffId);
+    if (!existing) {
+      throw new Error(`Staff ${input.staffId} not found`);
+    }
+    const calendarConnection: CalendarConnectionRecord = {
+      provider: input.provider,
+      accountEmail: input.accountEmail,
+      calendarId: input.calendarId,
+      timezone: input.timezone,
+      externalConnectionId: input.externalConnectionId,
+      connectedAt: input.connectedAt,
+    };
+    this.staffRecords.set(input.staffId, {
+      ...existing,
+      calendarProvider: input.provider,
+      outlookCalendarId: input.calendarId,
+      calendarConnection,
+      updatedAt: input.updatedAt,
+    });
+    return clone(calendarConnection);
+  }
 
   async listJobs(staffId?: string): Promise<JobRecord[]> {
     return clone([...this.jobs.values()].filter((job) => (staffId ? job.staffId === staffId : true)));
@@ -171,10 +348,10 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     if (!job) {
       return undefined;
     }
-    const staff = job.staffId ? this.staffProfiles.get(job.staffId) : undefined;
+    const staff = job.staffId ? this.staffRecords.get(job.staffId) : undefined;
     return {
       job: clone(job),
-      staff: staff ? clone(staff) : undefined,
+      staff: staff ? toStaffSummary(staff) : undefined,
       quotes: job.quote ? [clone(job.quote)] : [],
       photos: clone(job.photos),
       calls: clone(job.calls),

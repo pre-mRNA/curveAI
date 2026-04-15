@@ -18,6 +18,7 @@ function baseEnv(overrides: Partial<EdgeApiEnv> = {}): EdgeApiEnv {
     ADMIN_TOKEN: "admin-secret",
     AUTOMATION_SHARED_SECRET: "automation-secret",
     ASSET_SIGNING_SECRET: "asset-secret",
+    ALLOW_INSECURE_TEST_OTP: "true",
     PUBLIC_OPS_APP_URL: "https://curve-ai-ops.pages.dev",
     PUBLIC_ONBOARDING_APP_URL: "https://curve-ai-onboarding.pages.dev",
     PUBLIC_UPLOAD_APP_URL: "https://curve-ai-upload.pages.dev",
@@ -258,6 +259,32 @@ test("worker fails fast when Cloudflare bindings are missing", () => {
   assert.throws(() => createApp({ env: { ADMIN_TOKEN: "admin-secret" } }), /Cloudflare D1 binding `DB` is required/);
 });
 
+test("staff invite only returns raw OTPs when explicitly enabled", async () => {
+  const app = createApp({
+    env: baseEnv({ ALLOW_INSECURE_TEST_OTP: "false" }),
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  const response = await app.request("/staff/invite", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer admin-secret",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fullName: "Secure Staff",
+    }),
+  });
+  assert.equal(response.status, 201);
+  const body = (await response.json()) as {
+    otpCode?: string;
+    note?: string;
+  };
+  assert.equal(body.otpCode, undefined);
+  assert.equal(body.note, undefined);
+});
+
 test("customer upload flow stays on Cloudflare routes and produces signed photo assets", async () => {
   const app = createTestApp();
   const photoLinkHeaders = await automationHeaders("automation-secret", {
@@ -357,4 +384,160 @@ test("voice post-call writes call records into the Worker CRM store", async () =
   };
   assert.equal(jobCard.card.calls.length, 1);
   assert.equal(jobCard.card.calls[0]?.id, "call_123");
+});
+
+test("staff invite verification and staff-scoped job access work on the Worker", async () => {
+  const app = createTestApp();
+
+  const inviteResponse = await app.request("/staff/invite", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer admin-secret",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fullName: "Jordan Tradie",
+      email: "jordan@example.com",
+      phoneNumber: "+61422222222",
+      role: "Owner",
+      timezone: "Australia/Sydney",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as {
+    staff: { id: string; fullName: string };
+    inviteCode: string;
+    otpCode: string;
+  };
+  assert.ok(inviteBody.inviteCode.length >= 16);
+  assert.equal(inviteBody.staff.fullName, "Jordan Tradie");
+
+  const verifyResponse = await app.request("/staff/verify-otp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      staffId: inviteBody.staff.id,
+      inviteToken: inviteBody.inviteCode,
+      otpCode: inviteBody.otpCode,
+    }),
+  });
+  assert.equal(verifyResponse.status, 200);
+  const verifyBody = (await verifyResponse.json()) as {
+    staff: { id: string; otpVerifiedAt?: string };
+    session: { token: string };
+  };
+  assert.equal(verifyBody.staff.id, inviteBody.staff.id);
+  assert.ok(verifyBody.staff.otpVerifiedAt);
+
+  const meResponse = await app.request("/staff/me", {
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+    },
+  });
+  assert.equal(meResponse.status, 200);
+  const meBody = (await meResponse.json()) as {
+    staff: { id: string; voiceConsentStatus: string };
+  };
+  assert.equal(meBody.staff.id, inviteBody.staff.id);
+  assert.equal(meBody.staff.voiceConsentStatus, "pending");
+
+  const calendarResponse = await app.request("/staff/calendar/connect", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      staffId: inviteBody.staff.id,
+      provider: "outlook",
+      accountEmail: "jordan@example.com",
+      calendarId: "Jordan - TradieAI",
+      timezone: "Australia/Sydney",
+    }),
+  });
+  assert.equal(calendarResponse.status, 200);
+
+  const consentResponse = await app.request("/staff/voice-consent", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      staffId: inviteBody.staff.id,
+      consent: true,
+      signedBy: "Jordan Tradie",
+      capturedAt: "2026-04-15T00:00:00.000Z",
+    }),
+  });
+  assert.equal(consentResponse.status, 200);
+
+  const pricingResponse = await app.request("/staff/pricing-interview", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      staffId: inviteBody.staff.id,
+      responses: {
+        baseCalloutFee: 220,
+        hourlyRate: 165,
+      },
+    }),
+  });
+  assert.equal(pricingResponse.status, 200);
+
+  const contextHeaders = await automationHeaders("automation-secret", {
+    staffId: inviteBody.staff.id,
+    callerPhone: "+61433333333",
+    callerName: "Mia",
+    address: "14 Clarence Street",
+    suburb: "Marrickville",
+    issue: "Blocked stormwater drain",
+  });
+  const contextResponse = await app.request("/voice/context", {
+    method: "POST",
+    headers: contextHeaders,
+    body: JSON.stringify({
+      staffId: inviteBody.staff.id,
+      callerPhone: "+61433333333",
+      callerName: "Mia",
+      address: "14 Clarence Street",
+      suburb: "Marrickville",
+      issue: "Blocked stormwater drain",
+    }),
+  });
+  assert.equal(contextResponse.status, 200);
+  const contextBody = (await contextResponse.json()) as {
+    job: { id: string };
+  };
+
+  const jobsResponse = await app.request("/jobs", {
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+    },
+  });
+  assert.equal(jobsResponse.status, 200);
+  const jobsBody = (await jobsResponse.json()) as {
+    jobs: Array<{ id: string }>;
+  };
+  assert.equal(jobsBody.jobs.length, 1);
+  assert.equal(jobsBody.jobs[0]?.id, contextBody.job.id);
+
+  const jobCardResponse = await app.request(`/jobs/${contextBody.job.id}/card`, {
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+    },
+  });
+  assert.equal(jobCardResponse.status, 200);
+
+  const forbiddenJobsResponse = await app.request(`/jobs?staffId=staff_other`, {
+    headers: {
+      Authorization: `Bearer ${verifyBody.session.token}`,
+    },
+  });
+  assert.equal(forbiddenJobsResponse.status, 403);
 });

@@ -17,7 +17,7 @@ struct TradieAPIConfiguration {
 
 extension TradieAPIConfiguration {
     static var liveDefault: TradieAPIConfiguration {
-        TradieAPIConfiguration(baseURL: URL(string: "http://localhost:3000")!)
+        TradieAPIConfiguration(baseURL: URL(string: "http://localhost:8787")!)
     }
 }
 

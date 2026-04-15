@@ -20,6 +20,7 @@ import type {
   JobRecord,
   OnboardingSessionRecord,
   QuoteRecord,
+  StaffRecord,
 } from "./models.js";
 import {
   onboardingInviteInputSchema,
@@ -28,6 +29,11 @@ import {
   onboardingTurnInputSchema,
   onboardingVoiceSampleInputSchema,
   onboardingVoiceTokenInputSchema,
+  staffCalendarConnectInputSchema,
+  staffInviteInputSchema,
+  staffOtpVerificationInputSchema,
+  staffPricingInterviewInputSchema,
+  staffVoiceConsentInputSchema,
   sendPhotoLinkInputSchema,
   voiceAppointmentInputSchema,
   voiceCallbackInputSchema,
@@ -35,7 +41,7 @@ import {
   voicePostCallInputSchema,
   voiceQuoteInputSchema,
 } from "./validation.js";
-import { createId, signHmacSha256 } from "./crypto.js";
+import { createId, createParticipantToken, isExpired, sha256Hex, signHmacSha256 } from "./crypto.js";
 
 type AppBindings = { Bindings: EdgeApiEnv };
 
@@ -77,6 +83,50 @@ function parseValidation<TSchema extends ZodTypeAny>(schema: TSchema, input: unk
       path: issue.path.join("."),
       message: issue.message,
     })),
+  };
+}
+
+type AuthActor =
+  | { kind: "admin" }
+  | { kind: "staff"; staffId: string; expiresAt: string };
+
+function createOtpCode(): string {
+  const bytes = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(bytes);
+  return String((bytes[0] % 900000) + 100000);
+}
+
+function sanitizeStaff(staff: StaffRecord | undefined) {
+  if (!staff) {
+    return undefined;
+  }
+  const {
+    inviteTokenHash: _inviteTokenHash,
+    otpCodeHash: _otpCodeHash,
+    otpIssuedAt,
+    otpFailedAttempts,
+    otpVerifiedAt,
+    authExpiresAt,
+    ...safeStaff
+  } = staff;
+  return {
+    ...safeStaff,
+    otpIssuedAt,
+    otpFailedAttempts,
+    otpVerifiedAt,
+    authExpiresAt,
+  };
+}
+
+function derivePricingProfile(responses: Record<string, unknown>) {
+  const numeric = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+  return {
+    baseCalloutFee: numeric(responses.baseCalloutFee, 180),
+    minimumJobPrice: numeric(responses.minimumJobPrice, 160),
+    hourlyRate: numeric(responses.hourlyRate, 145),
+    rushMultiplier: numeric(responses.rushMultiplier, 1.35),
+    complexityMultiplier: numeric(responses.complexityMultiplier, 1.2),
+    confidenceFloor: numeric(responses.confidenceFloor, 0.68),
   };
 }
 
@@ -353,6 +403,41 @@ export function createApp(options?: {
     return undefined;
   }
 
+  async function authenticateActor(c: any): Promise<AuthActor | undefined> {
+    const token = getAccessToken(c.req.raw);
+    if (!token) {
+      return undefined;
+    }
+    if (config.adminToken && token === config.adminToken) {
+      return { kind: "admin" };
+    }
+
+    const tokenHash = await sha256Hex(token);
+    const session = await repo.getStaffSession(tokenHash);
+    if (!session || isExpired(session.expiresAt)) {
+      return undefined;
+    }
+    return {
+      kind: "staff",
+      staffId: session.staffId,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  async function requireStaffAccess(c: any, staffId: string) {
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return { actor, error: jsonError(c, 401, "Authentication is required") };
+    }
+    if (actor.kind === "admin") {
+      return { actor };
+    }
+    if (actor.staffId !== staffId) {
+      return { actor, error: jsonError(c, 403, "You do not have access to that staff profile") };
+    }
+    return { actor };
+  }
+
   async function requireOnboardingSession(c: any): Promise<OnboardingSessionResult> {
     const sessionId = c.req.param("id");
     const token = getAccessToken(c.req.raw);
@@ -394,13 +479,17 @@ export function createApp(options?: {
   });
 
   app.get("/jobs", async (c) => {
-    const authError = await requireAdmin(c);
-    if (authError) {
-      return authError;
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
     }
     const secret = getSignedAssetSecret(config);
     const staffId = c.req.query("staffId") ?? undefined;
-    const jobs = await repo.listJobs(staffId);
+    if (actor.kind !== "admin" && staffId && staffId !== actor.staffId) {
+      return jsonError(c, 403, "You do not have access to that staff queue");
+    }
+    const effectiveStaffId = actor.kind === "admin" ? staffId : actor.staffId;
+    const jobs = await repo.listJobs(effectiveStaffId);
     const dashboard = await mapDashboardPayload(jobs, [], config.publicApiUrl, secret, []);
     return c.json({
       ok: true,
@@ -409,9 +498,9 @@ export function createApp(options?: {
   });
 
   app.get("/jobs/:jobId/card", async (c) => {
-    const authError = await requireAdmin(c);
-    if (authError) {
-      return authError;
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
     }
     const jobId = c.req.param("jobId");
     if (!jobId) {
@@ -421,11 +510,239 @@ export function createApp(options?: {
     if (!card) {
       return jsonError(c, 404, "Job not found", { jobId });
     }
+    if (actor.kind !== "admin" && card.job.staffId && card.job.staffId !== actor.staffId) {
+      return jsonError(c, 403, "You do not have access to that job");
+    }
     const secret = getSignedAssetSecret(config);
     const signedCard = await signJobCardEnvelope(card, config.publicApiUrl, secret);
     return c.json({
       ok: true,
       card: signedCard,
+    });
+  });
+
+  app.post("/staff/invite", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffInviteInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+
+    const now = new Date();
+    const inviteToken = createParticipantToken();
+    const otpCode = createOtpCode();
+    const staff = await repo.saveStaffInvite({
+      staffId: createId("staff"),
+      fullName: parsed.data.fullName,
+      phoneNumber: parsed.data.phoneNumber,
+      email: parsed.data.email,
+      role: parsed.data.role,
+      timezone: parsed.data.timezone,
+      inviteTokenHash: await sha256Hex(inviteToken),
+      otpCodeHash: await sha256Hex(otpCode),
+      otpIssuedAt: now.toISOString(),
+      otpFailedAttempts: 0,
+      authExpiresAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+
+    return c.json(
+      {
+        ok: true,
+        staff: sanitizeStaff(staff),
+        inviteCode: inviteToken,
+        ...(config.allowInsecureTestOtp
+          ? {
+              otpCode,
+              note: "OTP is returned only when ALLOW_INSECURE_TEST_OTP is enabled for local/staging workflows.",
+            }
+          : {}),
+      },
+      { status: 201 },
+    );
+  });
+
+  app.post("/staff/verify-otp", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffOtpVerificationInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+
+    const inviteTokenHash = await sha256Hex(parsed.data.inviteToken);
+    const staff = await repo.findStaffByInviteTokenHash(inviteTokenHash);
+    if (!staff || (parsed.data.staffId && parsed.data.staffId !== staff.id) || !staff.otpCodeHash || !staff.otpIssuedAt) {
+      return jsonError(c, 404, "Staff not found or OTP did not match");
+    }
+
+    if (staff.authExpiresAt && isExpired(staff.authExpiresAt)) {
+      await repo.saveStaffAuthState({
+        staffId: staff.id,
+        inviteTokenHash: undefined,
+        otpCodeHash: undefined,
+        otpIssuedAt: undefined,
+        otpFailedAttempts: 0,
+        otpVerifiedAt: undefined,
+        authExpiresAt: undefined,
+        createdAt: staff.createdAt,
+        updatedAt: new Date().toISOString(),
+      });
+      return jsonError(c, 404, "Staff not found or OTP did not match");
+    }
+
+    const failedAttempts = staff.otpFailedAttempts ?? 0;
+    if (failedAttempts >= 5) {
+      return jsonError(c, 404, "Staff not found or OTP did not match");
+    }
+
+    const otpHash = await sha256Hex(parsed.data.otpCode);
+    if (otpHash !== staff.otpCodeHash) {
+      const nextAttempts = failedAttempts + 1;
+      await repo.saveStaffAuthState({
+        staffId: staff.id,
+        inviteTokenHash: nextAttempts >= 5 ? undefined : staff.inviteTokenHash,
+        otpCodeHash: nextAttempts >= 5 ? undefined : staff.otpCodeHash,
+        otpIssuedAt: nextAttempts >= 5 ? undefined : staff.otpIssuedAt,
+        otpFailedAttempts: nextAttempts,
+        otpVerifiedAt: undefined,
+        authExpiresAt: nextAttempts >= 5 ? undefined : staff.authExpiresAt,
+        createdAt: staff.createdAt,
+        updatedAt: new Date().toISOString(),
+      });
+      return jsonError(c, 404, "Staff not found or OTP did not match");
+    }
+
+    const now = new Date();
+    const sessionToken = createParticipantToken();
+    await repo.saveStaffAuthState({
+      staffId: staff.id,
+      inviteTokenHash: undefined,
+      otpCodeHash: undefined,
+      otpIssuedAt: undefined,
+      otpFailedAttempts: 0,
+      otpVerifiedAt: now.toISOString(),
+      authExpiresAt: undefined,
+      createdAt: staff.createdAt,
+      updatedAt: now.toISOString(),
+    });
+    await repo.createStaffSession({
+      tokenHash: await sha256Hex(sessionToken),
+      staffId: staff.id,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+    });
+    const verifiedStaff = await repo.getStaff(staff.id);
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(verifiedStaff ?? staff),
+      session: {
+        token: sessionToken,
+        expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+  });
+
+  app.get("/staff/me", async (c) => {
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
+    }
+    if (actor.kind === "admin") {
+      return jsonError(c, 400, "Admin tokens do not map to a single staff profile");
+    }
+    const staff = await repo.getStaff(actor.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(staff),
+    });
+  });
+
+  app.post("/staff/voice-consent", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffVoiceConsentInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const access = await requireStaffAccess(c, parsed.data.staffId);
+    if (access.error) {
+      return access.error;
+    }
+    await repo.recordVoiceConsent(parsed.data);
+    const staff = await repo.getStaff(parsed.data.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(staff),
+      signedBy: parsed.data.signedBy,
+    });
+  });
+
+  app.post("/staff/pricing-interview", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffPricingInterviewInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const access = await requireStaffAccess(c, parsed.data.staffId);
+    if (access.error) {
+      return access.error;
+    }
+    const capturedAt = new Date().toISOString();
+    await repo.savePricingInterview({
+      staffId: parsed.data.staffId,
+      responses: parsed.data.responses,
+      capturedAt,
+    });
+    const staff = await repo.getStaff(parsed.data.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(staff),
+      pricingProfile: staff.pricingProfile ?? derivePricingProfile(parsed.data.responses),
+    });
+  });
+
+  app.post("/staff/calendar/connect", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffCalendarConnectInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const access = await requireStaffAccess(c, parsed.data.staffId);
+    if (access.error) {
+      return access.error;
+    }
+    const now = new Date().toISOString();
+    const calendarConnection = await repo.saveStaffCalendarConnection({
+      staffId: parsed.data.staffId,
+      provider: parsed.data.provider,
+      accountEmail: parsed.data.accountEmail,
+      calendarId: parsed.data.calendarId,
+      timezone: parsed.data.timezone,
+      externalConnectionId: parsed.data.externalConnectionId,
+      connectedAt: now,
+      updatedAt: now,
+    });
+    const staff = await repo.getStaff(parsed.data.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(staff),
+      calendarConnection,
     });
   });
 

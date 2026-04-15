@@ -29,6 +29,7 @@ Use these as the deployment contract for the Worker:
 - `ADMIN_TOKEN` - admin auth for internal routes
 - `AUTOMATION_SHARED_SECRET` - HMAC secret for automation and voice routes
 - `ASSET_SIGNING_SECRET` - HMAC secret for signed photo asset URLs
+- `ALLOW_INSECURE_TEST_OTP` - optional `true` only for local/staging when the admin invite route should echo raw OTP codes before Twilio Verify exists
 - `ELEVENLABS_API_KEY` - ElevenLabs provider key
 - `ELEVENLABS_AGENT_ID` - ElevenLabs browser agent identifier
 - `REASONING_PROVIDER` - `mock`, `hosted`, or `openai-compatible`

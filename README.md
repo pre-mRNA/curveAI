@@ -11,7 +11,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 ## Workspace
 
 - `apps/api`: existing Express API scaffold for voice-control routes, lightweight CRM behavior, uploads, and local development reference
-- `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, ops/dashboard routes, voice tools, signed photo delivery, D1/R2/DO bindings, and Worker-native provider adapters
+- `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, staff session/auth routes, ops/dashboard routes, voice tools, signed photo delivery, D1/R2/DO bindings, and Worker-native provider adapters
 - `apps/web`: public onboarding app
 - `apps/ops-web`: internal ops dashboard
 - `apps/upload-web`: public customer photo upload app
@@ -37,7 +37,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `/voice/*` automation routes require an HMAC signature using `AUTOMATION_SHARED_SECRET` over `timestamp.rawBody`.
 - Browser onboarding uses an invite code to mint a session-specific onboarding token, then requires explicit recording and clone consent before issuing a realtime voice session.
 - Browser onboarding cannot finalize until calendar connect and a real audio voice sample are both present.
-- Staff app auth still uses invite + OTP, then mints a short-lived staff session token for iOS requests.
+- Staff app auth now runs through the Cloudflare Worker using invite + OTP, then mints a short-lived staff session token for iOS requests.
 - Customer photo uploads use opaque upload tokens, live on the dedicated upload Pages app, store artifacts in R2 through the Worker, and expose photos back to ops through signed Worker asset URLs.
 
 ## Onboarding

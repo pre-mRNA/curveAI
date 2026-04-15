@@ -4,7 +4,7 @@
 
 - Provider adapters: replace mock ElevenLabs browser, Microsoft calendar, and Twilio behavior with live clients behind the existing onboarding and voice routes.
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
-- Cloudflare deployment: finish the last legacy staff/iOS auth routes or move the SwiftUI client onto the onboarding-native Worker contracts so staging can drop the Express reference completely.
+- Cloudflare deployment: remove or retire the Express reference API once the remaining niche routes and local-dev docs no longer point at it.
 - Security hardening: add content sniffing for uploads and move from file-backed CRM persistence to a real database.
 
 ## Next
@@ -29,6 +29,7 @@
 - Split the Cloudflare browser surface into dedicated onboarding, ops, and upload Pages apps.
 - Migrated Worker-side dashboard, job-card, signed-photo, upload, voice tool, and post-call routes so the main browser flows no longer depend on the Express reference API.
 - Added D1 CRM tables and Worker coverage for Cloudflare-native photo upload and post-call persistence.
+- Added Worker-side staff invite/session routes and staff-scoped job access so the iOS app no longer depends on the Express reference API for auth.
 
 ## Review Queue
 
@@ -36,3 +37,4 @@
 - Revisit admin-token auth for the web console before production; session storage is better than local storage, but not a final control plane auth story.
 - Revisit OTP issuance and transport once Twilio Verify is wired in; the current in-house flow is an MVP guardrail, not a final identity solution.
 - Decide whether the SwiftUI app should keep the legacy `/staff/*` OTP/session flow or switch to the newer onboarding-session model before removing the Express reference API.
+- Tighten staff invite delivery so staging/dev OTP visibility is explicitly env-gated rather than always returned by the Worker admin route.

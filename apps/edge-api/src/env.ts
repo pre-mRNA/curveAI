@@ -12,6 +12,7 @@ export interface EdgeApiEnv {
   ADMIN_TOKEN?: string;
   AUTOMATION_SHARED_SECRET?: string;
   ASSET_SIGNING_SECRET?: string;
+  ALLOW_INSECURE_TEST_OTP?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_AGENT_ID?: string;
   MICROSOFT_TENANT_ID?: string;
@@ -38,6 +39,7 @@ export interface AppConfig {
   adminToken?: string;
   automationSharedSecret?: string;
   photoAccessSecret?: string;
+  allowInsecureTestOtp: boolean;
   realtimeVoiceMode: "mock" | "configured";
   reasoningMode: "mock" | "hosted" | "openai-compatible";
   calendarMode: "mock" | "configured";
@@ -71,6 +73,7 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
     env.ALLOWED_ORIGINS ?? env.ALLOWED_ORIGIN,
     [publicOpsAppUrl, publicOnboardingAppUrl, publicUploadAppUrl],
   );
+  const localApi = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(publicApiUrl);
   return {
     publicAppUrl,
     publicOpsAppUrl,
@@ -81,6 +84,7 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
     adminToken: env.ADMIN_TOKEN,
     automationSharedSecret: env.AUTOMATION_SHARED_SECRET,
     photoAccessSecret: env.ASSET_SIGNING_SECRET ?? env.AUTOMATION_SHARED_SECRET ?? env.ADMIN_TOKEN,
+    allowInsecureTestOtp: env.ALLOW_INSECURE_TEST_OTP === "true" || localApi,
     realtimeVoiceMode: env.ELEVENLABS_API_KEY && env.ELEVENLABS_AGENT_ID ? "configured" : "mock",
     reasoningMode:
       env.REASONING_BASE_URL && env.REASONING_API_KEY

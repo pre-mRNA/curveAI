@@ -93,6 +93,51 @@ export const onboardingVoiceSampleInputSchema = z
   })
   .strict();
 
+export const staffInviteInputSchema = z
+  .object({
+    fullName: z.string().min(1),
+    phoneNumber: z.string().min(3).optional(),
+    email: z.email().optional(),
+    role: z.string().min(1).optional(),
+    timezone: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const staffOtpVerificationInputSchema = z
+  .object({
+    staffId: z.string().min(1).optional(),
+    inviteToken: z.string().min(16),
+    otpCode: z.string().min(4),
+  })
+  .strict();
+
+export const staffVoiceConsentInputSchema = z
+  .object({
+    staffId: z.string().min(1),
+    consent: z.boolean(),
+    signedBy: z.string().min(1).optional(),
+    capturedAt: z.string().min(1),
+  })
+  .strict();
+
+export const staffPricingInterviewInputSchema = z
+  .object({
+    staffId: z.string().min(1),
+    responses: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+export const staffCalendarConnectInputSchema = z
+  .object({
+    staffId: z.string().min(1),
+    provider: z.literal("outlook").default("outlook"),
+    accountEmail: z.string().min(1).optional(),
+    calendarId: z.string().min(1).optional(),
+    timezone: z.string().min(1).optional(),
+    externalConnectionId: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const voiceContextInputSchema = z
   .object({
     jobId: z.string().min(1).optional(),
