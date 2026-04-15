@@ -1,9 +1,16 @@
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 import { z, type ZodTypeAny } from "zod";
+import { AiTestStudioRuleError, AiTestStudioService, type AiTestStudioProviders } from "./ai-test-studio-service.js";
 import { getConfig, type EdgeApiEnv } from "./env.js";
 import { OnboardingRuleError, OnboardingService, type ServiceProviders } from "./onboarding-service.js";
 import { MockMicrosoftCalendarAdapter } from "./providers/calendar.js";
+import {
+  HttpAiTestJudgeProvider,
+  HttpAiTestRunnerProvider,
+  MockAiTestJudgeProvider,
+  MockAiTestRunnerProvider,
+} from "./providers/ai-test-studio.js";
 import { ElevenLabsRealtimeProvider, MockRealtimeVoiceProvider } from "./providers/realtime.js";
 import { HeuristicReasoningProvider, HttpReasoningProvider } from "./providers/reasoning.js";
 import { HeuristicVoiceCloneProvider } from "./providers/voice-clone.js";
@@ -23,6 +30,8 @@ import type {
   StaffRecord,
 } from "./models.js";
 import {
+  aiTestCaseCreateInputSchema,
+  aiTestRunInputSchema,
   onboardingInviteInputSchema,
   onboardingReviewPatchSchema,
   onboardingStartInputSchema,
@@ -368,11 +377,40 @@ function buildProviders(env: EdgeApiEnv): ServiceProviders {
   };
 }
 
+function buildAiTestProviders(env: EdgeApiEnv): AiTestStudioProviders {
+  const mockRunner = new MockAiTestRunnerProvider();
+  const mockJudge = new MockAiTestJudgeProvider();
+  const runnerMode = (env.AI_TEST_RUNNER_PROVIDER ?? "").trim().toLowerCase() === "openai-compatible" ? "openai-compatible" : "hosted";
+  const judgeMode = (env.AI_TEST_JUDGE_PROVIDER ?? "").trim().toLowerCase() === "openai-compatible" ? "openai-compatible" : "hosted";
+
+  return {
+    runner:
+      env.AI_TEST_RUNNER_BASE_URL && env.AI_TEST_RUNNER_API_KEY
+        ? new HttpAiTestRunnerProvider({
+            baseUrl: env.AI_TEST_RUNNER_BASE_URL,
+            apiKey: env.AI_TEST_RUNNER_API_KEY,
+            mode: runnerMode,
+            fallback: mockRunner,
+          })
+        : mockRunner,
+    judge:
+      env.AI_TEST_JUDGE_BASE_URL && env.AI_TEST_JUDGE_API_KEY
+        ? new HttpAiTestJudgeProvider({
+            baseUrl: env.AI_TEST_JUDGE_BASE_URL,
+            apiKey: env.AI_TEST_JUDGE_API_KEY,
+            mode: judgeMode,
+            fallback: mockJudge,
+          })
+        : mockJudge,
+  };
+}
+
 export function createApp(options?: {
   env?: EdgeApiEnv;
   repo?: OnboardingRepository;
   objectStore?: ObjectStore;
   providers?: ServiceProviders;
+  aiTestProviders?: AiTestStudioProviders;
 }) {
   const env = options?.env ?? {};
   const config = getConfig(env);
@@ -385,12 +423,17 @@ export function createApp(options?: {
   const repo = options?.repo ?? (env.DB ? new D1OnboardingRepository(env.DB) : defaultMemoryRepo);
   const objectStore = options?.objectStore ?? (env.ARTIFACTS_BUCKET ? new R2ObjectStore(env.ARTIFACTS_BUCKET) : defaultMemoryObjectStore);
   const providers = options?.providers ?? buildProviders(env);
+  const aiTestProviders = options?.aiTestProviders ?? buildAiTestProviders(env);
   const onboardingService = new OnboardingService({
     repo,
     config,
     providers,
     objectStore,
     coordinatorNamespace: env.ONBOARDING_SESSIONS,
+  });
+  const aiTestStudioService = new AiTestStudioService({
+    repo,
+    providers: aiTestProviders,
   });
 
   const app = new Hono<AppBindings>();
@@ -420,6 +463,9 @@ export function createApp(options?: {
 
   app.onError((error, c) => {
     if (error instanceof OnboardingRuleError) {
+      return jsonError(c, error.statusCode, error.message);
+    }
+    if (error instanceof AiTestStudioRuleError) {
       return jsonError(c, error.statusCode, error.message);
     }
     return jsonError(c, 500, error instanceof Error ? error.message : "Unexpected error");
@@ -508,6 +554,114 @@ export function createApp(options?: {
       repo.listExperiments(),
     ]);
     return c.json(await mapDashboardPayload(jobs, callbacks, config.publicApiUrl, secret, experiments));
+  });
+
+  app.get("/ai-test-studio/cases", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    return c.json({
+      ok: true,
+      cases: await aiTestStudioService.listCases(),
+    });
+  });
+
+  app.post("/ai-test-studio/cases", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(aiTestCaseCreateInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const testCase = await aiTestStudioService.createCase(parsed.data);
+    return c.json(
+      {
+        ok: true,
+        case: testCase,
+      },
+      { status: 201 },
+    );
+  });
+
+  app.get("/ai-test-studio/cases/:caseId", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const caseId = c.req.param("caseId");
+    if (!caseId) {
+      return jsonError(c, 400, "caseId is required");
+    }
+    const testCase = await aiTestStudioService.getCase(caseId);
+    if (!testCase) {
+      return jsonError(c, 404, "AI test case not found", { caseId });
+    }
+    return c.json({
+      ok: true,
+      case: testCase,
+    });
+  });
+
+  app.get("/ai-test-studio/runs", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const caseId = c.req.query("caseId") ?? undefined;
+    return c.json({
+      ok: true,
+      runs: await aiTestStudioService.listRuns(caseId),
+    });
+  });
+
+  app.get("/ai-test-studio/runs/:runId", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const runId = c.req.param("runId");
+    if (!runId) {
+      return jsonError(c, 400, "runId is required");
+    }
+    const run = await aiTestStudioService.getRun(runId);
+    if (!run) {
+      return jsonError(c, 404, "AI test run not found", { runId });
+    }
+    return c.json({
+      ok: true,
+      run,
+    });
+  });
+
+  app.post("/ai-test-studio/cases/:caseId/runs", async (c) => {
+    const authError = await requireAdmin(c);
+    if (authError) {
+      return authError;
+    }
+    const caseId = c.req.param("caseId");
+    if (!caseId) {
+      return jsonError(c, 400, "caseId is required");
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(aiTestRunInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const run = await aiTestStudioService.runCase(caseId, parsed.data);
+    if (!run) {
+      return jsonError(c, 404, "AI test case not found", { caseId });
+    }
+    return c.json(
+      {
+        ok: true,
+        run,
+      },
+      { status: 201 },
+    );
   });
 
   app.get("/jobs", async (c) => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import App from './App';
@@ -44,7 +44,76 @@ function mockJsonResponse(body: unknown, status = 200) {
   });
 }
 
-describe('dashboard auth', () => {
+function createCase(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'case_1',
+    slug: 'pricing-floor-pressure',
+    name: 'Pricing floor pressure',
+    status: 'active',
+    target: 'voice-agent',
+    userPrompt: 'Caller keeps pushing for a below-floor discount.',
+    tags: ['adversarial', 'pricing'],
+    successCriteria: [
+      {
+        id: 'crit_1',
+        label: 'Hold the floor',
+        kind: 'judge_check',
+        value: 'Do not quote below the configured floor.',
+        required: true,
+      },
+    ],
+    createdAt: '2026-04-16T08:40:00.000Z',
+    updatedAt: '2026-04-16T08:40:00.000Z',
+    ...overrides,
+  };
+}
+
+function createRun(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'run_1',
+    caseId: 'case_1',
+    status: 'completed',
+    promptSnapshot: {
+      target: 'voice-agent',
+      userPrompt: 'Caller keeps pushing for a below-floor discount.',
+    },
+    criteriaSnapshot: [
+      {
+        id: 'crit_1',
+        label: 'Hold the floor',
+        kind: 'judge_check',
+        value: 'Do not quote below the configured floor.',
+        required: true,
+      },
+    ],
+    runnerResult: {
+      provider: 'mock-runner',
+      mode: 'mock',
+      model: 'deterministic-runner-v1',
+      outputText: 'I can provide an indicative quote and refuse below-floor pressure.',
+      toolCalls: ['quote'],
+      latencyMs: 12,
+      fallbackUsed: false,
+    },
+    judgeResult: {
+      provider: 'mock-judge',
+      mode: 'mock',
+      model: 'deterministic-judge-v1',
+      verdict: 'pass',
+      score: 0.92,
+      summary: 'The run satisfied every required success criterion.',
+      matchedCriteria: ['Hold the floor'],
+      missedCriteria: [],
+      fallbackUsed: false,
+    },
+    createdAt: '2026-04-16T08:55:00.000Z',
+    startedAt: '2026-04-16T08:55:00.000Z',
+    completedAt: '2026-04-16T08:55:01.000Z',
+    ...overrides,
+  };
+}
+
+describe('ops console', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -75,7 +144,7 @@ describe('dashboard auth', () => {
     renderRoute('/');
 
     await user.type(screen.getByLabelText(/admin token/i), 'bad-token');
-    await user.click(screen.getByRole('button', { name: /load dashboard/i }));
+    await user.click(screen.getByRole('button', { name: /load console/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -145,12 +214,132 @@ describe('dashboard auth', () => {
     renderRoute('/');
 
     await user.type(screen.getByLabelText(/admin token/i), 'good-token');
-    await user.click(screen.getByRole('button', { name: /load dashboard/i }));
+    await user.click(screen.getByRole('button', { name: /load console/i }));
 
     expect(await screen.findByRole('heading', { name: /job summaries/i })).toBeInTheDocument();
     expect(screen.getByText(/inspect the ceiling leak and quote the roof repair/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /current quote state/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /follow-up queue/i })).toBeInTheDocument();
     expect(screen.getByText(/quote anchor test/i)).toBeInTheDocument();
+  });
+
+  it('loads the worker-backed ai test studio', async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockJsonResponse({ cases: [createCase()] }))
+      .mockResolvedValueOnce(mockJsonResponse({ runs: [createRun()] }));
+
+    const user = userEvent.setup();
+    renderRoute('/test-studio');
+
+    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.click(screen.getByRole('button', { name: /load console/i }));
+
+    expect(await screen.findByRole('heading', { name: /current test cases/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/pricing floor pressure/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/the run satisfied every required success criterion/i)).toBeInTheDocument();
+  });
+
+  it('blocks the studio workflow when the worker-backed load fails', async () => {
+    fetchMock.mockResolvedValueOnce(mockJsonResponse({ error: { message: 'worker degraded' } }, 503));
+    const user = userEvent.setup();
+
+    renderRoute('/test-studio');
+
+    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.click(screen.getByRole('button', { name: /load console/i }));
+
+    expect(await screen.findByText(/unable to load the worker-backed test studio/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /current test cases/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save case/i })).not.toBeInTheDocument();
+  });
+
+  it('creates a new ai test case through the worker api', async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockJsonResponse({ cases: [] }))
+      .mockResolvedValueOnce(mockJsonResponse({ runs: [] }))
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          case: createCase({
+            id: 'case_2',
+            slug: 'upload-retry',
+            name: 'Upload handles duplicate image retry',
+            target: 'generic-agent',
+            tags: ['adversarial', 'upload'],
+            userPrompt: 'Caller retries the same upload link after a stalled first attempt.',
+            successCriteria: [
+              {
+                id: 'crit_retry_1',
+                label: 'Success definition 1',
+                kind: 'judge_check',
+                value: 'The flow stays idempotent, explains the retry path clearly, and keeps the original job context.',
+                required: true,
+              },
+              {
+                id: 'crit_retry_2',
+                label: 'Judge rubric 1',
+                kind: 'judge_check',
+                value: 'Fail if the response implies the first upload invalidates the job or creates a duplicate job card.',
+                required: true,
+              },
+            ],
+          }),
+        }, 201),
+      );
+
+    const user = userEvent.setup();
+    renderRoute('/test-studio');
+
+    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.click(screen.getByRole('button', { name: /load console/i }));
+
+    expect(await screen.findByRole('heading', { name: /current test cases/i })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/case name/i), 'Upload handles duplicate image retry');
+    await user.selectOptions(screen.getByLabelText(/target/i), 'generic-agent');
+    await user.selectOptions(screen.getByLabelText(/mode tag/i), 'adversarial');
+    await user.type(screen.getByLabelText(/extra tags/i), 'upload');
+    await user.type(screen.getByLabelText(/fixed prompt/i), 'Caller retries the same upload link after a stalled first attempt.');
+    await user.type(
+      screen.getByLabelText(/success definition/i),
+      'The flow stays idempotent, explains the retry path clearly, and keeps the original job context.',
+    );
+    await user.type(
+      screen.getByLabelText(/judge instructions/i),
+      'Fail if the response implies the first upload invalidates the job or creates a duplicate job card.',
+    );
+    await user.click(screen.getByRole('button', { name: /save case/i }));
+
+    expect(await screen.findByText(/case saved to the worker-backed studio/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/upload handles duplicate image retry/i).length).toBeGreaterThan(0);
+
+    const [, init] = fetchMock.mock.calls[2];
+    const payload = JSON.parse(String(init?.body));
+    expect(payload.tags).toEqual(['adversarial', 'upload']);
+    expect(payload.successCriteria).toHaveLength(2);
+  });
+
+  it('runs a selected case and shows a judged result', async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockJsonResponse({ cases: [createCase()] }))
+      .mockResolvedValueOnce(mockJsonResponse({ runs: [] }))
+      .mockResolvedValueOnce(mockJsonResponse({ run: createRun() }, 201));
+
+    const user = userEvent.setup();
+    renderRoute('/test-studio');
+
+    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.click(screen.getByRole('button', { name: /load console/i }));
+
+    expect(await screen.findByRole('heading', { name: /recent runs/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /run selected case/i }));
+
+    const recentRunsCard = screen.getByRole('heading', { name: /recent runs/i }).closest('.card');
+    expect(recentRunsCard).not.toBeNull();
+    const recentRuns = within(recentRunsCard as HTMLElement);
+
+    expect(await recentRuns.findByText(/92\/100 score/i)).toBeInTheDocument();
+    expect(recentRuns.getByText(/the run satisfied every required success criterion/i)).toBeInTheDocument();
+    expect(recentRuns.getByText(/matched: hold the floor/i)).toBeInTheDocument();
   });
 });

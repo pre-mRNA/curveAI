@@ -1,4 +1,6 @@
 import type {
+  AiTestCaseRecord,
+  AiTestRunRecord,
   AppointmentRecord,
   CalendarConnectionRecord,
   CallbackTaskRecord,
@@ -147,4 +149,11 @@ export interface OnboardingRepository {
   getUploadRequest(token: string): Promise<UploadRequestRecord | undefined>;
   completeUploadRequest(token: string, photos: JobPhoto[]): Promise<UploadRequestRecord | undefined>;
   getPhotoAsset(photoId: string): Promise<JobPhoto | undefined>;
+  listAiTestCases(): Promise<AiTestCaseRecord[]>;
+  getAiTestCase(id: string): Promise<AiTestCaseRecord | undefined>;
+  getAiTestCaseBySlug(slug: string): Promise<AiTestCaseRecord | undefined>;
+  saveAiTestCase(testCase: AiTestCaseRecord): Promise<void>;
+  listAiTestRuns(caseId?: string): Promise<AiTestRunRecord[]>;
+  getAiTestRun(id: string): Promise<AiTestRunRecord | undefined>;
+  saveAiTestRun(run: AiTestRunRecord): Promise<void>;
 }

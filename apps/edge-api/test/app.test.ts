@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  aiTestCaseResponseSchema,
+  aiTestRunListResponseSchema,
+  aiTestRunResponseSchema,
+} from "../../../packages/shared/src/ai-test-studio";
 import { createApp } from "../src/app.js";
 import { signHmacSha256 } from "../src/crypto.js";
 import type { EdgeApiEnv } from "../src/env.js";
+import {
+  HttpAiTestJudgeProvider,
+  HttpAiTestRunnerProvider,
+  MockAiTestJudgeProvider,
+  MockAiTestRunnerProvider,
+} from "../src/providers/ai-test-studio.js";
 import { InMemoryOnboardingRepository } from "../src/storage/memory.js";
 import { InMemoryObjectStore } from "../src/storage/artifacts.js";
 
@@ -10,6 +21,13 @@ function authHeaders(token: string): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
     "X-Onboarding-Token": token,
+  };
+}
+
+function adminHeaders(): HeadersInit {
+  return {
+    Authorization: "Bearer admin-secret",
+    "Content-Type": "application/json",
   };
 }
 
@@ -614,4 +632,156 @@ test("staff invite verification and staff-scoped job access work on the Worker",
     },
   });
   assert.equal(forbiddenJobsResponse.status, 403);
+});
+
+test("ai test studio routes require admin authentication", async () => {
+  const app = createTestApp();
+
+  const response = await app.request("/ai-test-studio/cases");
+  assert.equal(response.status, 401);
+});
+
+test("ai test studio can persist cases and execute a passing mock run", async () => {
+  const app = createTestApp();
+
+  const createResponse = await app.request("/ai-test-studio/cases", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      name: "Photo upload and closeout",
+      target: "voice-agent",
+      userPrompt: "The caller wants a quote, may need to upload photos, and asks whether the agent can hang up cleanly.",
+      tags: ["smoke", "voice"],
+      successCriteria: [
+        {
+          label: "Mentions the secure photo flow",
+          kind: "response_contains",
+          value: "secure photo upload link",
+          required: true,
+        },
+        {
+          label: "Mentions clean call ending",
+          kind: "response_contains",
+          value: "end the call cleanly",
+          required: true,
+        },
+        {
+          label: "Avoids promising to ignore safety",
+          kind: "response_avoids",
+          value: "ignore safety",
+          required: true,
+        },
+      ],
+    }),
+  });
+  assert.equal(createResponse.status, 201);
+  const createBody = (await createResponse.json()) as { case: unknown };
+  const created = aiTestCaseResponseSchema.parse({ case: createBody.case });
+  assert.equal(created.case.status, "active");
+
+  const listResponse = await app.request("/ai-test-studio/cases", {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+  assert.equal(listResponse.status, 200);
+  const listBody = (await listResponse.json()) as { cases: Array<{ id: string }> };
+  assert.equal(listBody.cases.length, 1);
+  assert.equal(listBody.cases[0]?.id, created.case.id);
+
+  const runResponse = await app.request(`/ai-test-studio/cases/${created.case.id}/runs`, {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      operatorNotes: "Smoke the first internal loop.",
+    }),
+  });
+  assert.equal(runResponse.status, 201);
+  const runBody = (await runResponse.json()) as { run: unknown };
+  const run = aiTestRunResponseSchema.parse({ run: runBody.run });
+  assert.equal(run.run.status, "completed");
+  assert.equal(run.run.judgeResult?.verdict, "pass");
+  assert.equal(run.run.runnerResult?.fallbackUsed, false);
+  assert.ok(run.run.runnerResult?.toolCalls.includes("send-photo-link"));
+  assert.ok(run.run.runnerResult?.toolCalls.includes("quote"));
+  assert.ok(run.run.runnerResult?.toolCalls.includes("end_call"));
+
+  const getRunResponse = await app.request(`/ai-test-studio/runs/${run.run.id}`, {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+  assert.equal(getRunResponse.status, 200);
+  const getRunBody = (await getRunResponse.json()) as { run: unknown };
+  const fetchedRun = aiTestRunResponseSchema.parse({ run: getRunBody.run });
+  assert.equal(fetchedRun.run.id, run.run.id);
+
+  const runsResponse = await app.request(`/ai-test-studio/runs?caseId=${created.case.id}`, {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+  assert.equal(runsResponse.status, 200);
+  const runsBody = (await runsResponse.json()) as { runs: unknown };
+  const parsedRuns = aiTestRunListResponseSchema.parse({ runs: runsBody.runs });
+  assert.equal(parsedRuns.runs.length, 1);
+  assert.equal(parsedRuns.runs[0]?.id, run.run.id);
+});
+
+test("ai test studio falls back to mock providers when hosted providers fail", async () => {
+  const repo = new InMemoryOnboardingRepository();
+  const fetchImpl = async () => new Response(JSON.stringify({ ok: false }), { status: 502 });
+  const app = createApp({
+    env: baseEnv(),
+    repo,
+    objectStore: new InMemoryObjectStore(),
+    aiTestProviders: {
+      runner: new HttpAiTestRunnerProvider({
+        baseUrl: "https://runner.example.com",
+        apiKey: "runner-key",
+        mode: "hosted",
+        fallback: new MockAiTestRunnerProvider(),
+        fetchImpl,
+      }),
+      judge: new HttpAiTestJudgeProvider({
+        baseUrl: "https://judge.example.com",
+        apiKey: "judge-key",
+        mode: "hosted",
+        fallback: new MockAiTestJudgeProvider(),
+        fetchImpl,
+      }),
+    },
+  });
+
+  const createResponse = await app.request("/ai-test-studio/cases", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      name: "Fallback runner coverage",
+      target: "generic-agent",
+      userPrompt: "Describe the secure photo upload path for a caller.",
+      successCriteria: [
+        {
+          label: "Mentions photo flow",
+          kind: "response_contains",
+          value: "secure photo upload link",
+          required: true,
+        },
+      ],
+    }),
+  });
+  assert.equal(createResponse.status, 201);
+  const createBody = (await createResponse.json()) as { case: { id: string } };
+
+  const runResponse = await app.request(`/ai-test-studio/cases/${createBody.case.id}/runs`, {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({}),
+  });
+  assert.equal(runResponse.status, 201);
+  const runBody = (await runResponse.json()) as { run: unknown };
+  const run = aiTestRunResponseSchema.parse({ run: runBody.run });
+  assert.equal(run.run.status, "completed");
+  assert.equal(run.run.runnerResult?.fallbackUsed, true);
+  assert.equal(run.run.judgeResult?.fallbackUsed, true);
 });

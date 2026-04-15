@@ -427,6 +427,84 @@ export interface UploadRequestRecord {
   files: JobPhoto[];
 }
 
+export type AiTestProviderMode = "mock" | "hosted" | "openai-compatible";
+export type AiTestCaseStatus = "draft" | "active" | "archived";
+export type AiTestTarget = "voice-agent" | "onboarding" | "generic-agent";
+export type AiTestCriterionKind = "response_contains" | "response_avoids" | "judge_check";
+export type AiTestRunStatus = "running" | "completed" | "failed";
+export type AiTestRunVerdict = "pass" | "fail" | "needs_review";
+
+export interface AiTestSuccessCriterionRecord {
+  id: string;
+  label: string;
+  kind: AiTestCriterionKind;
+  value: string;
+  required: boolean;
+}
+
+export interface AiTestCaseRecord {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  status: AiTestCaseStatus;
+  target: AiTestTarget;
+  systemPrompt?: string;
+  userPrompt: string;
+  tags: string[];
+  successCriteria: AiTestSuccessCriterionRecord[];
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string;
+}
+
+export interface AiTestPromptSnapshot {
+  target: AiTestTarget;
+  systemPrompt?: string;
+  userPrompt: string;
+}
+
+export interface AiTestRunnerResultRecord {
+  provider: string;
+  mode: AiTestProviderMode;
+  model: string;
+  outputText: string;
+  toolCalls: string[];
+  latencyMs: number;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface AiTestJudgeResultRecord {
+  provider: string;
+  mode: AiTestProviderMode;
+  model: string;
+  verdict: AiTestRunVerdict;
+  score: number;
+  summary: string;
+  matchedCriteria: string[];
+  missedCriteria: string[];
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface AiTestRunRecord {
+  id: string;
+  caseId: string;
+  status: AiTestRunStatus;
+  operatorNotes?: string;
+  promptSnapshot: AiTestPromptSnapshot;
+  criteriaSnapshot: AiTestSuccessCriterionRecord[];
+  runnerResult?: AiTestRunnerResultRecord;
+  judgeResult?: AiTestJudgeResultRecord;
+  errorMessage?: string;
+  createdAt: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
 export function createDefaultReview(fullName?: string, role?: string): ExtractionReview {
   return {
     businessSummary: fullName ? `${fullName} onboarding has started.` : "Onboarding interview in progress.",

@@ -13,9 +13,10 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `apps/api`: existing Express API scaffold for voice-control routes, lightweight CRM behavior, uploads, and local development reference
 - `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, staff session/auth routes, ops/dashboard routes, voice tools, signed photo delivery, D1/R2/DO bindings, and Worker-native provider adapters
 - `apps/web`: public onboarding app
-- `apps/ops-web`: internal ops dashboard
+- `apps/ops-web`: internal ops dashboard plus Worker-backed AI test studio
+- `apps/staff-web`: phone-first staff Pages app that currently replaces the native pilot for queue/setup testing
 - `apps/upload-web`: public customer photo upload app
-- `apps/ios`: native SwiftUI staff app
+- `apps/ios`: deferred native SwiftUI staff app reference
 - `packages/shared`: shared domain models, onboarding contracts, and pricing logic
 - `docs/mvp-board.md`: local Kanban board for active MVP work
 
@@ -25,8 +26,8 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 2. Install workspace dependencies with `npm install`.
 3. Start the Express reference API with `npm run dev:api` if you need the older local stack.
 4. Start the Cloudflare Worker API with `npm run dev:edge-api` for the current deployment target.
-5. Start the onboarding app with `npm run dev:web`, the ops dashboard with `npm run dev:ops-web`, or the upload app with `npm run dev:upload-web`.
-6. Open the iOS app from `apps/ios/TradieAI.xcodeproj`.
+5. Start the onboarding app with `npm run dev:web`, the ops dashboard with `npm run dev:ops-web`, the staff app with `npm run dev:staff-web`, or the upload app with `npm run dev:upload-web`.
+6. Open the iOS app from `apps/ios/TradieAI.xcodeproj` only if you need the deferred native reference surface.
 7. Run Express API tests with `npm run test:api`.
 8. Run Worker API tests with `npm run test:edge-api`.
 9. Run web tests with `npm run test:web`, `npm run test:ops-web`, and `npm run test:upload-web`.
@@ -37,7 +38,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `/voice/*` automation routes require an HMAC signature using `AUTOMATION_SHARED_SECRET` over `timestamp.rawBody`.
 - Browser onboarding uses an invite code to mint a session-specific onboarding token, then requires explicit recording and clone consent before issuing a realtime voice session.
 - Browser onboarding cannot finalize until calendar connect and a real audio voice sample are both present.
-- Staff app auth now runs through the Cloudflare Worker using invite + OTP, then mints a short-lived staff session token for iOS requests.
+- Staff Pages auth now runs through the Cloudflare Worker using invite + OTP, then mints a short-lived staff session token for browser queue/setup access.
 - Customer photo uploads use opaque upload tokens, live on the dedicated upload Pages app, store artifacts in R2 through the Worker, and expose photos back to ops through signed Worker asset URLs.
 
 ## Onboarding
@@ -47,6 +48,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - API reasoning, realtime voice, calendar, and clone behavior sit behind provider interfaces so the control plane can move toward self-hosted Australian infrastructure later without rewriting the product flow.
 - Onboarding session bearer tokens now expire with the invite window, completed sessions are immutable, and configured Microsoft callbacks require a real auth code instead of trusting query-string identity data.
 - The Cloudflare Worker now owns dashboard reads, job cards, upload token/photo flows, signed photo assets, and `voice/post-call` ingestion in addition to onboarding.
+- The internal AI test studio now persists fixed cases and judged runs through the Cloudflare Worker instead of browser-only local state.
 
 ## Verification
 
@@ -55,6 +57,8 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `npm run test:edge-api`
 - `npm run test:api`
 - `npm run test -w @curve-ai/web`
+- `npm run test -w @curve-ai/ops-web`
+- `npm run test -w @curve-ai/staff-web`
 - `xcodebuild -list -project apps/ios/TradieAI.xcodeproj`
 
 ## Security

@@ -4,7 +4,7 @@
 
 ### Platform Summary
 
-- Build a greenfield platform with four surfaces: ElevenLabs-based voice onboarding and phone agents, a Cloudflare Pages web app plus Worker API, a native SwiftUI staff iOS app, and an internal web ops console.
+- Build a greenfield platform with four surfaces: ElevenLabs-based voice onboarding and phone agents, split Cloudflare Pages browser apps plus Worker API, a phone-first staff Pages app that temporarily replaces the native pilot, and an internal web ops console.
 - Each staff member gets a dedicated ElevenLabs agent, personal cloned voice, calendar connection, pricing profile, and experiment assignments.
 - Core v1 actions: answer calls broadly with guardrails, give indicative or guardrailed dynamic quotes, book calendar appointments, text secure photo-upload links, create callback tasks, summarize jobs for tradies, and end calls cleanly with ElevenLabs `end_call`.
 
@@ -14,13 +14,13 @@
 - Voice: ElevenLabs per-staff agents with webhook-driven context, quote tools, booking tools, photo-link tools, callback tools, and post-call ingestion.
 - Staff onboarding: browser-first invite flow, voice-clone consent, structured interview extraction, Outlook connect, clean voice sample upload, and staff-specific routing data.
 - Pricing: base pricebook plus personalized staff pricing profiles, experiment bands, floors, ceilings, audit trails, and accepted-price tracking.
-- Surfaces: internal web ops console, customer upload page, and native SwiftUI staff app with card-style job summaries.
+- Surfaces: internal web ops console, AI test studio, customer upload page, onboarding page, and a phone-first staff browser app with card-style job summaries.
 
 ### Defaults Chosen
 
 - Launch region: Australia
 - Inbound routing: per-staff number or provider-managed routing depending on deployment phase
-- Staff app auth: invite + OTP
+- Staff app auth: invite + OTP via browser-first Pages surface
 - Calendar model: per-staff calendars behind a provider adapter
 - Upload mode: SMS signed link
 - Escalation default: callback-first, with transfer-to-human behind a feature flag
@@ -65,3 +65,8 @@
 - Reworked the onboarding landing page into a real recovery surface with invite-code entry, clearer step cards, and denser mobile progress UI instead of the previous dead-end info page.
 - Upgraded the public upload page so it fetches the upload token context, shows friendlier error copy, uses a more action-first layout on phones, and keeps the visual system aligned with the onboarding and ops apps.
 - Updated Cloudflare deployment docs and the onboarding web README to document `VITE_API_BASE_URL`, `CLOUDFLARE_D1_DATABASE`, and the Worker readiness contract.
+- Added the first persistent AI test studio loop in the Worker with D1-backed test cases/runs, mock or HTTP runner/judge adapters, and admin-only routes for creating/running/listing cases.
+- Reworked the ops console AI studio from browser-local demo state into a Worker-backed internal lab with starter case seeding, judged run history, and mobile ordering that keeps the selected case ahead of the long create form.
+- Added `apps/staff-web` as the temporary native replacement: invite + OTP sign-in, session restore, staff queue/job-card views, setup completion flows, and a phone-first shell that hits the Worker directly.
+- Tightened the staff browser app so it no longer retains one-time invite tokens, signs out consistently on expired sessions, surfaces Worker error messages cleanly, and labels calendar setup as a placeholder mapping rather than a live OAuth connection.
+- Verified the rendered ops and staff Pages UIs with local screenshots in desktop/mobile layouts instead of relying only on code inspection.

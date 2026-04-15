@@ -3,7 +3,7 @@
     "composite": true,
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -18,5 +18,5 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "../../packages/shared/src/ai-test-studio.ts"]
+  "include": ["src"]
 }

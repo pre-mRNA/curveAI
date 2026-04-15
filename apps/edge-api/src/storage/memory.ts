@@ -1,4 +1,6 @@
 import {
+  type AiTestCaseRecord,
+  type AiTestRunRecord,
   type AppointmentRecord,
   type CalendarConnectionRecord,
   type CallbackTaskRecord,
@@ -132,6 +134,8 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   private readonly photos = new Map<string, JobPhoto>();
   private readonly staffRecords = new Map<string, StaffRecord>();
   private readonly staffSessions = new Map<string, StaffSessionRecord>();
+  private readonly aiTestCases = new Map<string, AiTestCaseRecord>();
+  private readonly aiTestRuns = new Map<string, AiTestRunRecord>();
 
   async createInvite(invite: InviteRecord): Promise<void> {
     this.invites.set(invite.id, clone(invite));
@@ -583,5 +587,46 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   async getPhotoAsset(photoId: string): Promise<JobPhoto | undefined> {
     const photo = this.photos.get(photoId);
     return photo ? clone(photo) : undefined;
+  }
+
+  async listAiTestCases(): Promise<AiTestCaseRecord[]> {
+    return clone(
+      [...this.aiTestCases.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    );
+  }
+
+  async getAiTestCase(id: string): Promise<AiTestCaseRecord | undefined> {
+    const record = this.aiTestCases.get(id);
+    return record ? clone(record) : undefined;
+  }
+
+  async getAiTestCaseBySlug(slug: string): Promise<AiTestCaseRecord | undefined> {
+    for (const testCase of this.aiTestCases.values()) {
+      if (testCase.slug === slug) {
+        return clone(testCase);
+      }
+    }
+    return undefined;
+  }
+
+  async saveAiTestCase(testCase: AiTestCaseRecord): Promise<void> {
+    this.aiTestCases.set(testCase.id, clone(testCase));
+  }
+
+  async listAiTestRuns(caseId?: string): Promise<AiTestRunRecord[]> {
+    return clone(
+      [...this.aiTestRuns.values()]
+        .filter((run) => (caseId ? run.caseId === caseId : true))
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt)),
+    );
+  }
+
+  async getAiTestRun(id: string): Promise<AiTestRunRecord | undefined> {
+    const record = this.aiTestRuns.get(id);
+    return record ? clone(record) : undefined;
+  }
+
+  async saveAiTestRun(run: AiTestRunRecord): Promise<void> {
+    this.aiTestRuns.set(run.id, clone(run));
   }
 }

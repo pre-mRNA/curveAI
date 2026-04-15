@@ -8,6 +8,8 @@ Do not treat this app as "static Pages only". The product needs server-side secr
 ## Target Topology
 
 - `Pages` hosts separate browser apps for onboarding, internal ops, and customer uploads.
+- `Pages` also hosts a staff-facing browser app while the native mobile surface is deferred.
+- The internal ops Pages app now also hosts the first Worker-backed AI test studio route.
 - `Workers` hosts the API surface, including onboarding, health, uploads, provider glue, and admin-only routes.
 - `D1` stores durable relational state for staff, invites, onboarding sessions, jobs, quotes, uploads, and provider metadata.
 - `R2` stores photos, voice samples, and other artifacts.
@@ -22,6 +24,7 @@ Use these as the deployment contract for the Worker:
 - `ARTIFACTS_BUCKET` - R2 binding for uploads and voice artifacts
 - `ONBOARDING_SESSIONS` - Durable Object namespace for live interview coordination
 - `PUBLIC_OPS_APP_URL` - internal ops Pages origin
+- `PUBLIC_STAFF_APP_URL` - staff-facing Pages origin if deployed separately
 - `PUBLIC_ONBOARDING_APP_URL` - public onboarding Pages origin
 - `PUBLIC_UPLOAD_APP_URL` - public customer upload Pages origin
 - `PUBLIC_API_URL` - Worker origin
@@ -75,6 +78,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 
 - The repo now includes a dedicated Worker app at `apps/edge-api`.
 - Use `npm run dev:edge-api` for the Cloudflare-targeted API, `npm run dev:web` for onboarding, `npm run dev:ops-web` for the internal dashboard, and `npm run dev:upload-web` for the customer upload flow.
+- Use `npm run dev:staff-web` for the staff-facing browser app.
 - For local Pages builds, set `VITE_API_BASE_URL=http://127.0.0.1:8787`.
 - For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
 - Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
@@ -85,6 +89,8 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 
 - Static Pages alone is not enough for this product.
 - The deployment target is Cloudflare-only, and the repo now includes Worker implementations for health, dashboard auth, browser onboarding, Microsoft callback handling, upload token/photo flows, signed photo assets, and the current voice tool endpoints including post-call ingestion.
+- The staff browser app currently replaces the native iOS surface for live queue testing; it should be treated as a first-class Pages deployment in CORS and environment setup.
+- The AI test studio now depends on the same Worker origin and admin token flow as the ops dashboard, so it should be treated as part of the protected internal Pages surface rather than a separate local-only tool.
 - `/health` now reports worker readiness warnings when required public URLs or signing secrets are missing, and non-local requests fail fast when the worker is misconfigured.
 - The Express app remains a local reference, but the Cloudflare route surface is now the primary staging path for onboarding, ops, and customer uploads.
 - Keep core business logic portable so the worker runtime can be swapped or self-hosted later if needed.

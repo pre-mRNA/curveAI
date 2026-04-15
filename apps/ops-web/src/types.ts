@@ -52,3 +52,14 @@ export interface DashboardPayload {
   callbacks: CallbackTask[];
   experiments: PricingExperiment[];
 }
+
+export type {
+  AiTestCase,
+  AiTestCaseCreateInput,
+  AiTestRun,
+  AiTestRunCreateInput,
+  AiTestRunStatus,
+  AiTestRunVerdict,
+  AiTestSuccessCriterion,
+  AiTestTarget,
+} from '../../../packages/shared/src/ai-test-studio';

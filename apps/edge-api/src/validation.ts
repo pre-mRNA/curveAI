@@ -138,6 +138,43 @@ export const staffCalendarConnectInputSchema = z
   })
   .strict();
 
+export const aiTestCaseCreateInputSchema = z
+  .object({
+    slug: z
+      .string()
+      .min(2)
+      .max(80)
+      .regex(/^[a-z0-9-]+$/)
+      .optional(),
+    name: z.string().min(1),
+    description: z.string().min(1).optional(),
+    status: z.enum(["draft", "active", "archived"]).default("active"),
+    target: z.enum(["voice-agent", "onboarding", "generic-agent"]).default("voice-agent"),
+    systemPrompt: z.string().min(1).optional(),
+    userPrompt: z.string().min(1),
+    tags: z.array(z.string().min(1)).max(20).default([]),
+    successCriteria: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).optional(),
+            label: z.string().min(1),
+            kind: z.enum(["response_contains", "response_avoids", "judge_check"]),
+            value: z.string().min(1),
+            required: z.boolean().default(true),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+export const aiTestRunInputSchema = z
+  .object({
+    operatorNotes: z.string().min(1).max(1000).optional(),
+  })
+  .strict();
+
 export const voiceContextInputSchema = z
   .object({
     jobId: z.string().min(1).optional(),

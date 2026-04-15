@@ -12,11 +12,13 @@
     "dev:edge-api": "npm run dev -w @curve-ai/edge-api",
     "dev:web": "npm run dev -w @curve-ai/web",
     "dev:ops-web": "npm run dev -w @curve-ai/ops-web",
+    "dev:staff-web": "npm run dev -w @curve-ai/staff-web",
     "dev:upload-web": "npm run dev -w @curve-ai/upload-web",
     "test:edge-api": "npm run test -w @curve-ai/edge-api",
     "test:api": "npm run test -w @curve-ai/api",
     "test:web": "npm run test -w @curve-ai/web",
     "test:ops-web": "npm run test -w @curve-ai/ops-web",
+    "test:staff-web": "npm run test -w @curve-ai/staff-web",
     "test:upload-web": "npm run test -w @curve-ai/upload-web",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

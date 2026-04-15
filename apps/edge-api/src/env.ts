@@ -4,6 +4,7 @@ export interface EdgeApiEnv {
   ONBOARDING_SESSIONS?: DurableObjectNamespace;
   PUBLIC_APP_URL?: string;
   PUBLIC_OPS_APP_URL?: string;
+  PUBLIC_STAFF_APP_URL?: string;
   PUBLIC_ONBOARDING_APP_URL?: string;
   PUBLIC_UPLOAD_APP_URL?: string;
   PUBLIC_API_URL?: string;
@@ -23,6 +24,12 @@ export interface EdgeApiEnv {
   REASONING_PROVIDER?: string;
   REASONING_BASE_URL?: string;
   REASONING_API_KEY?: string;
+  AI_TEST_RUNNER_PROVIDER?: string;
+  AI_TEST_RUNNER_BASE_URL?: string;
+  AI_TEST_RUNNER_API_KEY?: string;
+  AI_TEST_JUDGE_PROVIDER?: string;
+  AI_TEST_JUDGE_BASE_URL?: string;
+  AI_TEST_JUDGE_API_KEY?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
   R2_ACCESS_KEY_ID?: string;
@@ -32,6 +39,7 @@ export interface EdgeApiEnv {
 export interface AppConfig {
   publicAppUrl: string;
   publicOpsAppUrl: string;
+  publicStaffAppUrl?: string;
   publicOnboardingAppUrl: string;
   publicUploadAppUrl: string;
   publicApiUrl: string;
@@ -71,12 +79,15 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
   const publicAppUrl = env.PUBLIC_APP_URL ?? env.PUBLIC_ONBOARDING_APP_URL ?? "http://localhost:5173";
   const publicApiUrl = env.PUBLIC_API_URL ?? "http://localhost:8787";
   const publicOpsAppUrl = env.PUBLIC_OPS_APP_URL ?? publicAppUrl;
+  const publicStaffAppUrl = env.PUBLIC_STAFF_APP_URL;
   const publicOnboardingAppUrl = env.PUBLIC_ONBOARDING_APP_URL ?? publicAppUrl;
   const publicUploadAppUrl = env.PUBLIC_UPLOAD_APP_URL ?? publicAppUrl;
   const reasoningProvider = (env.REASONING_PROVIDER ?? "").trim().toLowerCase();
   const allowedOrigins = toList(
     env.ALLOWED_ORIGINS ?? env.ALLOWED_ORIGIN,
-    [publicOpsAppUrl, publicOnboardingAppUrl, publicUploadAppUrl],
+    [publicOpsAppUrl, publicStaffAppUrl, publicOnboardingAppUrl, publicUploadAppUrl].filter(
+      (value): value is string => Boolean(value),
+    ),
   );
   const warnings: string[] = [];
 
@@ -111,6 +122,7 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
   return {
     publicAppUrl,
     publicOpsAppUrl,
+    publicStaffAppUrl,
     publicOnboardingAppUrl,
     publicUploadAppUrl,
     publicApiUrl,

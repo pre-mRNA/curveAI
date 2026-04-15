@@ -1,4 +1,10 @@
 import {
+  type AiTestCaseRecord,
+  type AiTestJudgeResultRecord,
+  type AiTestPromptSnapshot,
+  type AiTestRunRecord,
+  type AiTestRunnerResultRecord,
+  type AiTestSuccessCriterionRecord,
   type AppointmentRecord,
   type CalendarConnectionRecord,
   type CallbackTaskRecord,
@@ -249,6 +255,37 @@ interface ExperimentRow {
   exposure: string;
   lift: string;
   sample_size: number;
+}
+
+interface AiTestCaseRow {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  status: AiTestCaseRecord["status"];
+  target: AiTestCaseRecord["target"];
+  system_prompt: string | null;
+  user_prompt: string;
+  tags_json: string;
+  success_criteria_json: string;
+  created_at: string;
+  updated_at: string;
+  last_run_at: string | null;
+}
+
+interface AiTestRunRow {
+  id: string;
+  case_id: string;
+  status: AiTestRunRecord["status"];
+  operator_notes: string | null;
+  prompt_snapshot_json: string;
+  criteria_snapshot_json: string;
+  runner_result_json: string | null;
+  judge_result_json: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string;
+  completed_at: string | null;
 }
 
 const dashboardExperiments: DashboardExperiment[] = [
@@ -545,6 +582,48 @@ function rowToPricingInterview(row: PricingInterviewRow): PricingInterviewRecord
   return {
     answeredAt: row.captured_at,
     responses: parseJson<Record<string, unknown>>(row.responses_json, {}) ?? {},
+  };
+}
+
+function rowToAiTestCase(row: AiTestCaseRow): AiTestCaseRecord {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description ?? undefined,
+    status: row.status,
+    target: row.target,
+    systemPrompt: row.system_prompt ?? undefined,
+    userPrompt: row.user_prompt,
+    tags: parseJson<string[]>(row.tags_json, []) ?? [],
+    successCriteria: parseJson<AiTestSuccessCriterionRecord[]>(row.success_criteria_json, []) ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastRunAt: row.last_run_at ?? undefined,
+  };
+}
+
+function rowToAiTestRun(row: AiTestRunRow): AiTestRunRecord {
+  return {
+    id: row.id,
+    caseId: row.case_id,
+    status: row.status,
+    operatorNotes: row.operator_notes ?? undefined,
+    promptSnapshot:
+      parseJson<AiTestPromptSnapshot>(row.prompt_snapshot_json, {
+        target: "generic-agent",
+        userPrompt: "",
+      }) ?? {
+        target: "generic-agent",
+        userPrompt: "",
+      },
+    criteriaSnapshot: parseJson<AiTestSuccessCriterionRecord[]>(row.criteria_snapshot_json, []) ?? [],
+    runnerResult: parseJson<AiTestRunnerResultRecord>(row.runner_result_json),
+    judgeResult: parseJson<AiTestJudgeResultRecord>(row.judge_result_json),
+    errorMessage: row.error_message ?? undefined,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? undefined,
   };
 }
 
@@ -1492,6 +1571,119 @@ export class D1OnboardingRepository implements OnboardingRepository {
       .bind(photoId)
       .first<PhotoRow>();
     return row ? rowToPhoto(row) : undefined;
+  }
+
+  async listAiTestCases(): Promise<AiTestCaseRecord[]> {
+    const rows = await this.db.prepare(`SELECT * FROM ai_test_cases ORDER BY updated_at DESC`).all<AiTestCaseRow>();
+    return (rows.results ?? []).map(rowToAiTestCase);
+  }
+
+  async getAiTestCase(id: string): Promise<AiTestCaseRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM ai_test_cases WHERE id = ? LIMIT 1`)
+      .bind(id)
+      .first<AiTestCaseRow>();
+    return row ? rowToAiTestCase(row) : undefined;
+  }
+
+  async getAiTestCaseBySlug(slug: string): Promise<AiTestCaseRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM ai_test_cases WHERE slug = ? LIMIT 1`)
+      .bind(slug)
+      .first<AiTestCaseRow>();
+    return row ? rowToAiTestCase(row) : undefined;
+  }
+
+  async saveAiTestCase(testCase: AiTestCaseRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO ai_test_cases (
+          id, slug, name, description, status, target, system_prompt, user_prompt, tags_json,
+          success_criteria_json, created_at, updated_at, last_run_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          slug = excluded.slug,
+          name = excluded.name,
+          description = excluded.description,
+          status = excluded.status,
+          target = excluded.target,
+          system_prompt = excluded.system_prompt,
+          user_prompt = excluded.user_prompt,
+          tags_json = excluded.tags_json,
+          success_criteria_json = excluded.success_criteria_json,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          last_run_at = excluded.last_run_at`,
+      )
+      .bind(
+        testCase.id,
+        testCase.slug,
+        testCase.name,
+        testCase.description ?? null,
+        testCase.status,
+        testCase.target,
+        testCase.systemPrompt ?? null,
+        testCase.userPrompt,
+        JSON.stringify(testCase.tags),
+        JSON.stringify(testCase.successCriteria),
+        testCase.createdAt,
+        testCase.updatedAt,
+        testCase.lastRunAt ?? null,
+      )
+      .run();
+  }
+
+  async listAiTestRuns(caseId?: string): Promise<AiTestRunRecord[]> {
+    const query = caseId
+      ? this.db.prepare(`SELECT * FROM ai_test_runs WHERE case_id = ? ORDER BY started_at DESC`).bind(caseId)
+      : this.db.prepare(`SELECT * FROM ai_test_runs ORDER BY started_at DESC`);
+    const rows = await query.all<AiTestRunRow>();
+    return (rows.results ?? []).map(rowToAiTestRun);
+  }
+
+  async getAiTestRun(id: string): Promise<AiTestRunRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM ai_test_runs WHERE id = ? LIMIT 1`)
+      .bind(id)
+      .first<AiTestRunRow>();
+    return row ? rowToAiTestRun(row) : undefined;
+  }
+
+  async saveAiTestRun(run: AiTestRunRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO ai_test_runs (
+          id, case_id, status, operator_notes, prompt_snapshot_json, criteria_snapshot_json,
+          runner_result_json, judge_result_json, error_message, created_at, started_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          case_id = excluded.case_id,
+          status = excluded.status,
+          operator_notes = excluded.operator_notes,
+          prompt_snapshot_json = excluded.prompt_snapshot_json,
+          criteria_snapshot_json = excluded.criteria_snapshot_json,
+          runner_result_json = excluded.runner_result_json,
+          judge_result_json = excluded.judge_result_json,
+          error_message = excluded.error_message,
+          created_at = excluded.created_at,
+          started_at = excluded.started_at,
+          completed_at = excluded.completed_at`,
+      )
+      .bind(
+        run.id,
+        run.caseId,
+        run.status,
+        run.operatorNotes ?? null,
+        JSON.stringify(run.promptSnapshot),
+        JSON.stringify(run.criteriaSnapshot),
+        run.runnerResult ? JSON.stringify(run.runnerResult) : null,
+        run.judgeResult ? JSON.stringify(run.judgeResult) : null,
+        run.errorMessage ?? null,
+        run.createdAt,
+        run.startedAt,
+        run.completedAt ?? null,
+      )
+      .run();
   }
 
   private async listPhotosByUploadToken(token: string): Promise<JobPhoto[]> {
