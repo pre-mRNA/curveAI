@@ -1,5 +1,5 @@
 import { onboardingChecklist } from "./checklist.js";
-import { createId, createInviteCode, createParticipantToken, isExpired, sha256Hex } from "./crypto.js";
+import { constantTimeEqual, createId, createInviteCode, createParticipantToken, isExpired, sha256Hex } from "./crypto.js";
 import type { AppConfig } from "./env.js";
 import type {
   CalendarConnectionSummary,
@@ -104,6 +104,12 @@ export class OnboardingService {
     const participantTokenHash = await sha256Hex(rawParticipantToken);
     const now = new Date().toISOString();
     let session = invite.sessionId ? await this.options.repo.getSessionById(invite.sessionId) : undefined;
+    if (session && !isExpired(session.expiresAt) && session.status !== "completed") {
+      throw new OnboardingRuleError(
+        "This onboarding invite already has an active session. Resume it from the original browser tab or issue a new invite.",
+        409,
+      );
+    }
     if (!session || isExpired(session.expiresAt) || session.status === "completed") {
       session = {
         id: createId("sess"),
@@ -122,9 +128,6 @@ export class OnboardingService {
         review: normalizeReview(undefined, invite.fullName, invite.role),
       };
       invite.sessionId = session.id;
-    } else {
-      session.participantTokenHash = participantTokenHash;
-      session.updatedAt = now;
     }
 
     invite.status = "started";
@@ -142,7 +145,7 @@ export class OnboardingService {
       return undefined;
     }
     const tokenHash = await sha256Hex(token);
-    if (tokenHash !== session.participantTokenHash) {
+    if (!constantTimeEqual(tokenHash, session.participantTokenHash)) {
       return undefined;
     }
     return session;
@@ -320,6 +323,7 @@ export class OnboardingService {
       throw new OnboardingRuleError("Voice clone consent is required before uploading a voice sample.", 400);
     }
 
+    const previousStoredPath = session.voiceSample?.storedPath;
     const key = `uploads/voice-samples/${session.id}/${Date.now()}-${sanitizeFilename(input.file.originalName ?? "voice-sample.webm")}`;
     const storedPath = await this.options.objectStore.put(key, input.file.blob, {
       contentType: input.file.mimeType,
@@ -335,6 +339,9 @@ export class OnboardingService {
     session.voiceSample = enrichedAssessment;
     session.status = "voice_sample";
     session.updatedAt = new Date().toISOString();
+    if (previousStoredPath && previousStoredPath !== storedPath) {
+      await this.options.objectStore.delete(previousStoredPath);
+    }
     await this.options.repo.saveSession(session);
     await this.touchCoordinator(session.id, "voice-sample", session.status);
     return this.getSessionSummary(session);
@@ -355,6 +362,7 @@ export class OnboardingService {
     session.status = "completed";
     session.finalizedAt = new Date().toISOString();
     session.updatedAt = session.finalizedAt;
+    session.participantTokenHash = await sha256Hex(createParticipantToken());
     await this.options.repo.saveSession(session);
 
     const invite = await this.options.repo.getInviteById(session.inviteId);
@@ -430,7 +438,12 @@ export class OnboardingService {
       analysis: session.analysis,
       voiceSession: session.voiceSession,
       calendar: session.calendar,
-      voiceSample: session.voiceSample,
+      voiceSample: session.voiceSample
+        ? {
+            ...session.voiceSample,
+            storedPath: undefined,
+          }
+        : undefined,
       turns,
       updatedAt: session.updatedAt,
     };

@@ -29,7 +29,6 @@ export const photoAssetSchema = z.object({
   id: z.string(),
   jobId: z.string(),
   filename: z.string(),
-  url: z.string(),
   uploadedAt: z.string(),
 });
 

@@ -48,10 +48,8 @@ function createHeaders(initHeaders?: HeadersInit, auth?: AuthOptions): Headers {
 
   if (auth?.adminToken) {
     headers.set('Authorization', `Bearer ${auth.adminToken}`);
-    headers.set('X-Admin-Token', auth.adminToken);
   } else if (auth?.bearerToken) {
     headers.set('Authorization', `Bearer ${auth.bearerToken}`);
-    headers.set('X-Onboarding-Token', auth.bearerToken);
   }
 
   return headers;

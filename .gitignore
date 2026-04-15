@@ -18,6 +18,9 @@ secrets.local.env
 data/
 tmp/
 uploads/
+.wrangler/
+.dev.vars
+.dev.vars.*
 
 # Xcode
 DerivedData/

@@ -132,6 +132,7 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   private readonly calls = new Map<string, CallRecord>();
   private readonly uploadRequests = new Map<string, UploadRequestRecord>();
   private readonly photos = new Map<string, JobPhoto>();
+  private readonly automationReplayExpiries = new Map<string, string>();
   private readonly staffRecords = new Map<string, StaffRecord>();
   private readonly staffSessions = new Map<string, StaffSessionRecord>();
   private readonly aiTestCases = new Map<string, AiTestCaseRecord>();
@@ -587,6 +588,15 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   async getPhotoAsset(photoId: string): Promise<JobPhoto | undefined> {
     const photo = this.photos.get(photoId);
     return photo ? clone(photo) : undefined;
+  }
+
+  async claimAutomationReplay(fingerprint: string, expiresAt: string): Promise<boolean> {
+    const existingExpiry = this.automationReplayExpiries.get(fingerprint);
+    if (existingExpiry && Date.parse(existingExpiry) > Date.now()) {
+      return false;
+    }
+    this.automationReplayExpiries.set(fingerprint, expiresAt);
+    return true;
   }
 
   async listAiTestCases(): Promise<AiTestCaseRecord[]> {

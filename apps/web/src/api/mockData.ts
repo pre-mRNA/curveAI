@@ -9,8 +9,8 @@ export const mockDashboard: DashboardPayload = {
       summary: 'Blocked kitchen drain, needs same-day assessment and possible high-pressure jetting.',
       status: 'quoted',
       photos: [
-        { id: 'photo_1', url: 'https://images.unsplash.com/photo-1509749837427-ac94a2553d0e?auto=format&fit=crop&w=800&q=80', caption: 'Kitchen sink' },
-        { id: 'photo_2', url: 'https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&w=800&q=80', caption: 'Under-sink pipework' },
+        { id: 'photo_1', caption: 'Kitchen sink' },
+        { id: 'photo_2', caption: 'Under-sink pipework' },
       ],
       quote: {
         basePrice: 180,
@@ -29,7 +29,7 @@ export const mockDashboard: DashboardPayload = {
       summary: 'Burst flexi-hose behind vanity. Customer wants a callback before proceeding.',
       status: 'needs_follow_up',
       photos: [
-        { id: 'photo_3', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80', caption: 'Bathroom vanity' },
+        { id: 'photo_3', caption: 'Bathroom vanity' },
       ],
       quote: {
         basePrice: 240,
@@ -55,7 +55,7 @@ export const mockDashboard: DashboardPayload = {
       summary: 'After-hours AC fault. Caller uploaded exterior unit photos and wants the earliest bookable slot.',
       status: 'booked',
       photos: [
-        { id: 'photo_4', url: 'https://images.unsplash.com/photo-1590649554409-d2d7b6e3d7f2?auto=format&fit=crop&w=800&q=80', caption: 'Outdoor unit' },
+        { id: 'photo_4', caption: 'Outdoor unit' },
       ],
       quote: {
         basePrice: 320,

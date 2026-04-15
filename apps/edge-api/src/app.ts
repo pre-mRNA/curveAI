@@ -50,7 +50,7 @@ import {
   voicePostCallInputSchema,
   voiceQuoteInputSchema,
 } from "./validation.js";
-import { createId, createParticipantToken, isExpired, sha256Hex, signHmacSha256 } from "./crypto.js";
+import { constantTimeEqual, createId, createParticipantToken, isExpired, sha256Hex, signHmacSha256 } from "./crypto.js";
 
 type AppBindings = { Bindings: EdgeApiEnv };
 
@@ -154,6 +154,18 @@ function isExpiredUploadRequest(upload: { expiresAt: string }): boolean {
   return new Date(upload.expiresAt).getTime() < Date.now();
 }
 
+function toPublicUploadSummary(upload: {
+  fileCount: number;
+  status: string;
+  expiresAt: string;
+}) {
+  return {
+    fileCount: upload.fileCount,
+    status: upload.status,
+    expiresAt: upload.expiresAt,
+  };
+}
+
 function isLocalRequest(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -163,20 +175,59 @@ function isLocalRequest(url: string): boolean {
   }
 }
 
-function getSignedAssetSecret(config: ReturnType<typeof getConfig>): string {
-  if (!config.photoAccessSecret) {
-    throw new Error("Photo access signing secret is not configured");
-  }
-  return config.photoAccessSecret;
+type SupportedPhotoMimeType = "image/jpeg" | "image/png" | "image/webp" | "image/heic" | "image/heif";
+
+function bytesMatch(source: Uint8Array, prefix: number[]): boolean {
+  return prefix.every((value, index) => source[index] === value);
 }
 
-function isSupportedPhotoFile(file: Pick<File, "name" | "type" | "size">): boolean {
-  const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
-  const extension = file.name.toLowerCase().split(".").at(-1) ?? "";
-  if (file.type.startsWith("image/")) {
-    return true;
+function bytesToAscii(source: Uint8Array): string {
+  return Array.from(source, (value) => String.fromCharCode(value)).join("");
+}
+
+async function detectSupportedPhotoMimeType(file: Pick<File, "slice">): Promise<SupportedPhotoMimeType | undefined> {
+  const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  if (header.length < 12) {
+    return undefined;
   }
-  return allowedExtensions.has(extension);
+  if (bytesMatch(header, [0xff, 0xd8, 0xff])) {
+    return "image/jpeg";
+  }
+  if (bytesMatch(header, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+    return "image/png";
+  }
+  if (bytesToAscii(header.slice(0, 4)) === "RIFF" && bytesToAscii(header.slice(8, 12)) === "WEBP") {
+    return "image/webp";
+  }
+  if (bytesToAscii(header.slice(4, 8)) === "ftyp") {
+    const brand = bytesToAscii(header.slice(8, 12));
+    if (["heic", "heix", "hevc", "hevx"].includes(brand)) {
+      return "image/heic";
+    }
+    if (["heif", "heim", "heis", "mif1", "msf1"].includes(brand)) {
+      return "image/heif";
+    }
+  }
+  return undefined;
+}
+
+async function getTrustedPhotoMimeType(file: Pick<File, "type" | "slice">): Promise<SupportedPhotoMimeType | undefined> {
+  const detected = await detectSupportedPhotoMimeType(file);
+  if (!detected) {
+    return undefined;
+  }
+  if (!file.type) {
+    return detected;
+  }
+  const normalizedType = file.type.toLowerCase();
+  const allowedByDetected: Record<SupportedPhotoMimeType, Set<string>> = {
+    "image/jpeg": new Set(["image/jpeg", "image/pjpeg"]),
+    "image/png": new Set(["image/png"]),
+    "image/webp": new Set(["image/webp"]),
+    "image/heic": new Set(["image/heic", "image/heic-sequence", "application/octet-stream"]),
+    "image/heif": new Set(["image/heif", "image/heif-sequence", "application/octet-stream"]),
+  };
+  return allowedByDetected[detected].has(normalizedType) ? detected : undefined;
 }
 
 function sanitizeFilename(value: string): string {
@@ -243,22 +294,7 @@ function previewQuote(job: JobRecord): QuoteRecord {
   };
 }
 
-async function signPhotoUrl(publicApiUrl: string, secret: string, photoId: string, expiresAt: string): Promise<string> {
-  const signature = await signHmacSha256(secret, `${photoId}.${expiresAt}`);
-  const url = new URL(`/assets/photos/${encodeURIComponent(photoId)}`, publicApiUrl);
-  url.searchParams.set("expires", expiresAt);
-  url.searchParams.set("signature", signature);
-  return url.toString();
-}
-
-async function mapDashboardPayload(
-  jobs: JobRecord[],
-  callbacks: CallbackTaskRecord[],
-  publicApiUrl: string,
-  secret: string,
-  experiments: DashboardPayload["experiments"],
-): Promise<DashboardPayload> {
-  const photoUrlFor = async (photo: JobPhoto) => signPhotoUrl(publicApiUrl, secret, photo.id, new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString());
+async function mapDashboardPayload(jobs: JobRecord[], callbacks: CallbackTaskRecord[], experiments: DashboardPayload["experiments"]): Promise<DashboardPayload> {
   return {
     jobs: await Promise.all(
       jobs.map(async (job) => {
@@ -290,7 +326,6 @@ async function mapDashboardPayload(
           photos: await Promise.all(
             job.photos.map(async (photo) => ({
               id: photo.id,
-              url: await photoUrlFor(photo),
               caption: photo.caption ?? photo.filename ?? "Job photo",
             })),
           ),
@@ -328,22 +363,17 @@ async function mapDashboardPayload(
   };
 }
 
-async function signJobCardEnvelope(
-  card: JobCardEnvelope,
-  publicApiUrl: string,
-  secret: string,
-): Promise<JobCardEnvelope> {
-  const signPhoto = async (photo: JobPhoto) => ({
+async function signJobCardEnvelope(card: JobCardEnvelope): Promise<JobCardEnvelope> {
+  const mapPhoto = async (photo: JobPhoto) => ({
     ...photo,
-    url: await signPhotoUrl(publicApiUrl, secret, photo.id, new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()),
   });
   return {
     ...card,
     job: {
       ...card.job,
-      photos: await Promise.all(card.job.photos.map(signPhoto)),
+      photos: await Promise.all(card.job.photos.map(mapPhoto)),
     },
-    photos: await Promise.all(card.photos.map(signPhoto)),
+    photos: await Promise.all(card.photos.map(mapPhoto)),
   };
 }
 
@@ -454,9 +484,12 @@ export function createApp(options?: {
       return;
     }
     if (config.warnings.length > 0 && !isLocalRequest(c.req.url)) {
-      return jsonError(c, 503, "Worker configuration is incomplete", {
-        issues: config.warnings,
-      });
+      return jsonError(
+        c,
+        503,
+        "Worker configuration is incomplete",
+        hasAdminAccess(c.req.raw) ? { issues: config.warnings } : undefined,
+      );
     }
     await next();
   });
@@ -468,12 +501,25 @@ export function createApp(options?: {
     if (error instanceof AiTestStudioRuleError) {
       return jsonError(c, error.statusCode, error.message);
     }
-    return jsonError(c, 500, error instanceof Error ? error.message : "Unexpected error");
+    return jsonError(
+      c,
+      500,
+      isLocalRequest(c.req.url) || hasAdminAccess(c.req.raw)
+        ? error instanceof Error
+          ? error.message
+          : "Unexpected error"
+        : "Unexpected error",
+    );
   });
+
+  function hasAdminAccess(request: Request): boolean {
+    const token = getAccessToken(request);
+    return Boolean(token && config.adminToken && constantTimeEqual(token, config.adminToken));
+  }
 
   async function requireAdmin(c: any) {
     const token = getAccessToken(c.req.raw);
-    if (!token || !config.adminToken || token !== config.adminToken) {
+    if (!token || !config.adminToken || !constantTimeEqual(token, config.adminToken)) {
       return jsonError(c, 401, "Admin authentication is required");
     }
     return undefined;
@@ -484,7 +530,7 @@ export function createApp(options?: {
     if (!token) {
       return undefined;
     }
-    if (config.adminToken && token === config.adminToken) {
+    if (config.adminToken && constantTimeEqual(token, config.adminToken)) {
       return { kind: "admin" };
     }
 
@@ -530,16 +576,86 @@ export function createApp(options?: {
     return { session };
   }
 
+  async function verifyAutomationRequest(c: any): Promise<
+    | {
+        rawBody: string;
+        timestamp: string;
+        timestampMs: number;
+        signature: string;
+        replayFingerprint: string;
+      }
+    | { error: Response }
+  > {
+    const secret = config.automationSharedSecret;
+    if (!secret) {
+      return { error: jsonError(c, 503, "Automation signature secret is not configured") };
+    }
+    const timestamp = c.req.header("x-curve-timestamp");
+    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
+    const rawBody = await c.req.raw.text();
+    if (!timestamp || !signature) {
+      return { error: jsonError(c, 401, "Signed automation headers are required") };
+    }
+    const timestampMs = Number(timestamp);
+    const now = Date.now();
+    if (
+      !Number.isFinite(timestampMs) ||
+      timestampMs > now + 30 * 1000 ||
+      now - timestampMs > 5 * 60 * 1000
+    ) {
+      return { error: jsonError(c, 401, "Automation signature timestamp is invalid or expired") };
+    }
+    const expected = await signHmacSha256(
+      secret,
+      `${timestamp}.${c.req.method.toUpperCase()}.${c.req.path}.${rawBody}`,
+    );
+    if (!constantTimeEqual(expected, signature)) {
+      return { error: jsonError(c, 401, "Automation signature did not match") };
+    }
+    return {
+      rawBody,
+      timestamp,
+      timestampMs,
+      signature,
+      replayFingerprint: await sha256Hex(`${timestamp}.${signature}`),
+    };
+  }
+
+  async function enforceVoiceJobScope(c: any, jobId?: string, staffId?: string): Promise<Response | undefined> {
+    if (!jobId) {
+      return undefined;
+    }
+    const existing = await repo.getJobCard(jobId);
+    if (!existing?.job.staffId) {
+      return undefined;
+    }
+    if (!staffId) {
+      return jsonError(c, 400, "staffId is required when updating an existing job");
+    }
+    if (existing.job.staffId !== staffId) {
+      return jsonError(c, 403, "That job belongs to a different staff profile");
+    }
+    return undefined;
+  }
+
   app.get("/health", (c) =>
-    c.json({
-      ok: config.warnings.length === 0,
-      ready: config.warnings.length === 0,
-      runtime: "cloudflare-worker",
-      realtimeVoice: providers.realtimeVoice.mode,
-      reasoning: providers.reasoning.mode,
-      calendar: providers.calendar.mode,
-      warnings: config.warnings,
-    }),
+    c.json(
+      hasAdminAccess(c.req.raw) || isLocalRequest(c.req.url)
+        ? {
+            ok: config.warnings.length === 0,
+            ready: config.warnings.length === 0,
+            runtime: "cloudflare-worker",
+            realtimeVoice: providers.realtimeVoice.mode,
+            reasoning: providers.reasoning.mode,
+            calendar: providers.calendar.mode,
+            warnings: config.warnings,
+          }
+        : {
+            ok: config.warnings.length === 0,
+            ready: config.warnings.length === 0,
+            runtime: "cloudflare-worker",
+          },
+    ),
   );
 
   app.get("/dashboard", async (c) => {
@@ -547,13 +663,12 @@ export function createApp(options?: {
     if (authError) {
       return authError;
     }
-    const secret = getSignedAssetSecret(config);
     const [jobs, callbacks, experiments] = await Promise.all([
       repo.listJobs(),
       repo.listCallbacks(),
       repo.listExperiments(),
     ]);
-    return c.json(await mapDashboardPayload(jobs, callbacks, config.publicApiUrl, secret, experiments));
+    return c.json(await mapDashboardPayload(jobs, callbacks, experiments));
   });
 
   app.get("/ai-test-studio/cases", async (c) => {
@@ -669,14 +784,13 @@ export function createApp(options?: {
     if (!actor) {
       return jsonError(c, 401, "Authentication is required");
     }
-    const secret = getSignedAssetSecret(config);
     const staffId = c.req.query("staffId") ?? undefined;
     if (actor.kind !== "admin" && staffId && staffId !== actor.staffId) {
       return jsonError(c, 403, "You do not have access to that staff queue");
     }
     const effectiveStaffId = actor.kind === "admin" ? staffId : actor.staffId;
     const jobs = await repo.listJobs(effectiveStaffId);
-    const dashboard = await mapDashboardPayload(jobs, [], config.publicApiUrl, secret, []);
+    const dashboard = await mapDashboardPayload(jobs, [], []);
     return c.json({
       ok: true,
       jobs: dashboard.jobs,
@@ -699,8 +813,7 @@ export function createApp(options?: {
     if (actor.kind !== "admin" && card.job.staffId && card.job.staffId !== actor.staffId) {
       return jsonError(c, 403, "You do not have access to that job");
     }
-    const secret = getSignedAssetSecret(config);
-    const signedCard = await signJobCardEnvelope(card, config.publicApiUrl, secret);
+    const signedCard = await signJobCardEnvelope(card);
     return c.json({
       ok: true,
       card: signedCard,
@@ -787,7 +900,7 @@ export function createApp(options?: {
     }
 
     const otpHash = await sha256Hex(parsed.data.otpCode);
-    if (otpHash !== staff.otpCodeHash) {
+    if (!constantTimeEqual(otpHash, staff.otpCodeHash)) {
       const nextAttempts = failedAttempts + 1;
       await repo.saveStaffAuthState({
         staffId: staff.id,
@@ -1179,7 +1292,8 @@ export function createApp(options?: {
 
     const storedPhotos: JobPhoto[] = [];
     for (const file of files) {
-      if (!isSupportedPhotoFile(file)) {
+      const trustedMimeType = await getTrustedPhotoMimeType(file);
+      if (!trustedMimeType) {
         return jsonError(c, 400, "Only image uploads are allowed");
       }
       if (file.size > 15 * 1024 * 1024) {
@@ -1188,14 +1302,14 @@ export function createApp(options?: {
       const photoId = createId("photo");
       const objectKey = `uploads/photos/${upload.jobId}/${photoId}-${sanitizeFilename(file.name)}`;
       await objectStore.put(objectKey, file, {
-        contentType: file.type || undefined,
+        contentType: trustedMimeType,
       });
       const photo: JobPhoto = {
         id: photoId,
         jobId: upload.jobId,
         filename: file.name,
         objectKey,
-        mimeType: file.type || undefined,
+        mimeType: trustedMimeType,
         caption: toPhotoCaption(file.name),
         uploadedAt: new Date().toISOString(),
       };
@@ -1223,8 +1337,7 @@ export function createApp(options?: {
     return c.json({
       ok: true,
       uploaded: storedPhotos.length,
-      upload: completed,
-      photos: storedPhotos,
+      upload: toPublicUploadSummary(completed),
     });
   };
 
@@ -1239,7 +1352,7 @@ export function createApp(options?: {
     }
     return c.json({
       ok: true,
-      upload,
+      upload: toPublicUploadSummary(upload),
     });
   });
 
@@ -1247,32 +1360,28 @@ export function createApp(options?: {
   app.post("/uploads/:token/photos", handleUploadPhotos);
 
   app.post("/voice/context", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(voiceContextInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const hasContext =
@@ -1316,38 +1425,35 @@ export function createApp(options?: {
       response.job = job;
       const card = await repo.getJobCard(job.id);
       if (card) {
-        response.card = await signJobCardEnvelope(card, config.publicApiUrl, getSignedAssetSecret(config));
+        response.card = await signJobCardEnvelope(card);
       }
     }
     return c.json(response);
   });
 
   app.post("/voice/tools/quote", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(voiceQuoteInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const job = await repo.ensureJob({
@@ -1403,31 +1509,28 @@ export function createApp(options?: {
   });
 
   app.post("/voice/tools/callback", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(voiceCallbackInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const job = await repo.ensureJob({
@@ -1458,31 +1561,28 @@ export function createApp(options?: {
   });
 
   app.post("/voice/tools/appointment", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(voiceAppointmentInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const job = await repo.ensureJob({
@@ -1514,31 +1614,28 @@ export function createApp(options?: {
   });
 
   app.post("/voice/tools/send-photo-link", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(sendPhotoLinkInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const job = await repo.ensureJob({
@@ -1568,32 +1665,28 @@ export function createApp(options?: {
   });
 
   app.post("/voice/post-call", async (c) => {
-    const secret = config.automationSharedSecret;
-    if (!secret) {
-      return jsonError(c, 503, "Automation signature secret is not configured");
+    const verified = await verifyAutomationRequest(c);
+    if ("error" in verified) {
+      return verified.error;
     }
-    const timestamp = c.req.header("x-curve-timestamp");
-    const signature = c.req.header("x-curve-signature")?.replace(/^sha256=/, "");
-    const rawBody = await c.req.raw.text();
-    if (!timestamp || !signature) {
-      return jsonError(c, 401, "Signed automation headers are required");
-    }
-    const timestampMs = Number(timestamp);
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-      return jsonError(c, 401, "Automation signature timestamp is invalid or expired");
-    }
-    const expected = await signHmacSha256(secret, `${timestamp}.${rawBody}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Automation signature did not match");
-    }
-
-    const body = parseJsonBody(rawBody);
+    const body = parseJsonBody(verified.rawBody);
     if (body === undefined) {
       return jsonError(c, 400, "Invalid JSON body");
     }
     const parsed = parseValidation(voicePostCallInputSchema, body);
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const scopeError = await enforceVoiceJobScope(c, parsed.data.jobId, parsed.data.staffId);
+    if (scopeError) {
+      return scopeError;
+    }
+    const replayClaimed = await repo.claimAutomationReplay(
+      verified.replayFingerprint,
+      new Date(verified.timestampMs + 5 * 60 * 1000).toISOString(),
+    );
+    if (!replayClaimed) {
+      return jsonError(c, 409, "Automation request was already processed");
     }
 
     const job =
@@ -1632,24 +1725,23 @@ export function createApp(options?: {
   });
 
   app.get("/assets/photos/:photoId", async (c) => {
-    const secret = getSignedAssetSecret(config);
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
+    }
     const photoId = c.req.param("photoId");
-    const expires = c.req.query("expires");
-    const signature = c.req.query("signature");
-    if (!photoId || !expires || !signature) {
-      return jsonError(c, 400, "Signed photo access parameters are required");
-    }
-    const expiresMs = Date.parse(expires);
-    if (!Number.isFinite(expiresMs) || expiresMs < Date.now()) {
-      return jsonError(c, 410, "Signed photo URL has expired");
-    }
-    const expected = await signHmacSha256(secret, `${photoId}.${expires}`);
-    if (expected !== signature) {
-      return jsonError(c, 401, "Signed photo URL did not match");
+    if (!photoId) {
+      return jsonError(c, 400, "photoId is required");
     }
     const photo = await repo.getPhotoAsset(photoId);
     if (!photo) {
       return jsonError(c, 404, "Photo not found", { photoId });
+    }
+    if (actor.kind !== "admin") {
+      const card = await repo.getJobCard(photo.jobId);
+      if (!card?.job.staffId || card.job.staffId !== actor.staffId) {
+        return jsonError(c, 403, "You do not have access to that photo");
+      }
     }
     const object = await objectStore.get(photo.objectKey ?? photo.id);
     if (!object) {
@@ -1659,6 +1751,7 @@ export function createApp(options?: {
       headers: {
         "Content-Type": object.contentType ?? photo.mimeType ?? "application/octet-stream",
         "Cache-Control": "private, max-age=0, no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   });

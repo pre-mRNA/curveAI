@@ -260,7 +260,7 @@ export default function OnboardingPage() {
         setSession(null);
         setSessionToken('');
         setCurrentStep('consent');
-        setBootstrapError(error instanceof Error ? error.message : 'Saved onboarding session expired.');
+        setBootstrapError(error instanceof Error ? error.message : 'The secure onboarding session is no longer available.');
       } finally {
         if (alive) {
           setBootstrapLoading(false);
@@ -594,7 +594,15 @@ export default function OnboardingPage() {
       const result = await apiClient.finalizeOnboarding(session.id, sessionToken);
       setFinalizeResult(result);
       clearOnboardingSession();
-      void refreshSession(session.id, sessionToken, { syncStep: false }).catch(() => undefined);
+      setSession((current) =>
+        current
+          ? {
+              ...current,
+              status: 'complete',
+            }
+          : current,
+      );
+      setSessionToken('');
       setCurrentStep('complete');
     } catch (error) {
       setVoiceError(error instanceof Error ? error.message : 'Unable to finalize onboarding.');
@@ -611,7 +619,7 @@ export default function OnboardingPage() {
             <div className="card-inner">
               <div className="eyebrow">Invite onboarding</div>
               <h1>Preparing your secure onboarding session.</h1>
-              <p className="muted">Checking the invite and reloading any existing session state.</p>
+              <p className="muted">Checking the invite and preparing the next secure onboarding step.</p>
             </div>
           </div>
         </div>
@@ -679,8 +687,8 @@ export default function OnboardingPage() {
           <h1>Structured voice onboarding for tradies.</h1>
           <p>
             Invite code <code>{inviteCode}</code> opens a secure session for consent, interview, extraction review,
-            Microsoft calendar connect, voice sample capture, and finalization. The flow remembers progress on this
-            device so it can be resumed without losing context.
+            Microsoft calendar connect, voice sample capture, and finalization. Keep this tab open while onboarding;
+            the secure session stays active here until you finish or sign out.
           </p>
           <div className="meta-row">
             <span className="pill accent">Step {activeStepIndex + 1} of {STEPS.length}</span>

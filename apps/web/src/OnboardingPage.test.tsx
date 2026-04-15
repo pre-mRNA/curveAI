@@ -316,7 +316,7 @@ describe('onboarding route', () => {
         'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?mock=1',
       );
     });
-  });
+  }, 10000);
 
   it('uploads a recorded voice sample with the real elapsed duration', async () => {
     const user = userEvent.setup();

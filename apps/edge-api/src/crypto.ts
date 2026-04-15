@@ -28,6 +28,19 @@ export async function signHmacSha256(secret: string, payload: string): Promise<s
   return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function constantTimeEqual(left: string, right: string): boolean {
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  const maxLength = Math.max(leftBytes.length, rightBytes.length);
+  let mismatch = leftBytes.length ^ rightBytes.length;
+
+  for (let index = 0; index < maxLength; index += 1) {
+    mismatch |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+
+  return mismatch === 0;
+}
+
 export function createParticipantToken(): string {
   const bytes = new Uint8Array(24);
   globalThis.crypto.getRandomValues(bytes);

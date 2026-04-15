@@ -52,7 +52,7 @@
 - Added a persistent Cloudflare deployment note recommending `Pages + Worker API` for the web surface while keeping the orchestration core portable and removing Fly from the target topology.
 - Added `apps/edge-api`, a buildable Cloudflare Worker API with Hono, D1-backed repository scaffolding, R2 artifact storage, Durable Object session coordination, provider adapters, and tests for the browser onboarding happy path.
 - Split the browser surface into three Cloudflare Pages apps: `apps/web` for onboarding, `apps/ops-web` for the internal dashboard, and `apps/upload-web` for customer photo uploads.
-- Migrated the Cloudflare Worker beyond onboarding so it now serves dashboard/job-card reads, voice quote/callback/appointment/send-photo-link tools, signed photo asset URLs, customer photo uploads, and `voice/post-call` ingestion.
+- Migrated the Cloudflare Worker beyond onboarding so it now serves dashboard/job-card reads, voice quote/callback/appointment/send-photo-link tools, authenticated photo assets, customer photo uploads, and `voice/post-call` ingestion.
 - Reworked the Worker runtime so production requests use real Cloudflare bindings instead of silently falling back to in-memory state, and updated the deployment contract/docs to use separate ops/onboarding/upload origins.
 - Added the D1 CRM migration for jobs, quotes, appointments, callbacks, calls, upload requests, and photo assets, plus Worker tests covering the Cloudflare upload flow and post-call persistence.
 - Migrated the remaining SwiftUI-facing staff session flow into the Worker: `/staff/invite`, `/staff/verify-otp`, `/staff/me`, `/staff/voice-consent`, `/staff/pricing-interview`, `/staff/calendar/connect`, and staff-scoped `/jobs` access.
@@ -70,3 +70,14 @@
 - Added `apps/staff-web` as the temporary native replacement: invite + OTP sign-in, session restore, staff queue/job-card views, setup completion flows, and a phone-first shell that hits the Worker directly.
 - Tightened the staff browser app so it no longer retains one-time invite tokens, signs out consistently on expired sessions, surfaces Worker error messages cleanly, and labels calendar setup as a placeholder mapping rather than a live OAuth connection.
 - Verified the rendered ops and staff Pages UIs with local screenshots in desktop/mobile layouts instead of relying only on code inspection.
+- Ran a six-agent security review focused on API key leakage, privacy, token handling, public-route exposure, provider egress, and browser storage across the Worker and all Pages apps.
+- Hardened the Worker by gitignoring Cloudflare local state, redacting public `/health` and non-admin misconfiguration details, switching sensitive comparisons to constant-time checks, tightening OTP validation, and minimizing public upload-route metadata.
+- Blocked onboarding invite-code session takeover, revoked stale onboarding tokens on finalize, deleted replaced voice-sample artifacts, and stopped exposing internal voice-sample storage paths back to the browser.
+- Added server-side photo content sniffing plus `nosniff` asset responses so disguised non-image payloads cannot enter or render through the public photo pipeline.
+- Reduced browser credential exposure by removing duplicate auth headers, keeping the ops admin token in memory only, dropping cached staff profile data from `sessionStorage`, masking the public upload token in the UI, and verifying the changed surfaces with fresh mobile screenshots.
+- Bound `/voice/*` HMAC signatures to `timestamp + method + path + rawBody`, tightened the future-skew window, and added replay/boundary tests so signed requests cannot be replayed across different voice routes.
+- Switched protected photo delivery from bearer-style URLs to authenticated Worker asset fetches in the ops and staff apps, and added staff-specific photo-access coverage.
+- Made the fallback Pages review gate fail closed on non-local hosts when protection secrets are missing, added stricter cookie/security headers plus a small failure delay, and added per-app Pages `wrangler.jsonc` files plus repo-level deploy scripts.
+- Moved the Worker deploy path to an env-driven renderer so `CLOUDFLARE_D1_DATABASE_ID` can supply the real D1 binding at deploy time without editing checked-in config.
+- Stopped persisting raw upload tokens in new D1 writes by hashing the token before storage lookups/inserts and redacting the stored upload-link field while keeping the public flow unchanged.
+- Corrected the onboarding/staff UI after the move to memory-only session tokens so the product no longer promises durable browser resume semantics it does not actually provide.

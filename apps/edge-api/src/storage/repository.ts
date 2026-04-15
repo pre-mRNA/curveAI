@@ -149,6 +149,7 @@ export interface OnboardingRepository {
   getUploadRequest(token: string): Promise<UploadRequestRecord | undefined>;
   completeUploadRequest(token: string, photos: JobPhoto[]): Promise<UploadRequestRecord | undefined>;
   getPhotoAsset(photoId: string): Promise<JobPhoto | undefined>;
+  claimAutomationReplay(fingerprint: string, expiresAt: string): Promise<boolean>;
   listAiTestCases(): Promise<AiTestCaseRecord[]>;
   getAiTestCase(id: string): Promise<AiTestCaseRecord | undefined>;
   getAiTestCaseBySlug(slug: string): Promise<AiTestCaseRecord | undefined>;

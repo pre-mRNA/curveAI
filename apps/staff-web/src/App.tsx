@@ -9,6 +9,7 @@ import {
   saveVoiceConsent,
   verifyStaffOtp,
 } from './api/client';
+import { ProtectedImage } from './ProtectedImage';
 import { clearStaffSession, readStaffSession, saveStaffSession, updateStoredStaffProfile } from './lib/staffSession';
 import { testScenarios } from './testStudio';
 import type { JobCard, JobSummary, PricingProfile, StaffProfile } from './types';
@@ -450,10 +451,14 @@ function AppShell({
                       {selectedJobCard.photos.length ? (
                         <div className="photo-grid">
                           {selectedJobCard.photos.map((photo) => (
-                            <a key={photo.id} className="photo-thumb" href={photo.url} target="_blank" rel="noreferrer">
-                              <img src={photo.url} alt={photo.caption ?? photo.filename} loading="lazy" />
+                            <div key={photo.id} className="photo-thumb">
+                              <ProtectedImage
+                                photoId={photo.id}
+                                sessionToken={sessionToken}
+                                alt={photo.caption ?? photo.filename}
+                              />
                               <span>{photo.caption ?? photo.filename}</span>
-                            </a>
+                            </div>
                           ))}
                         </div>
                       ) : (
@@ -1002,7 +1007,7 @@ export default function App() {
       <div className="shell auth-shell">
         <div className="container">
           <div className="card">
-            <div className="card-inner">Restoring staff session…</div>
+            <div className="card-inner">Checking the current staff sign-in…</div>
           </div>
         </div>
       </div>

@@ -125,16 +125,20 @@ export class AiTestStudioService {
         testCase,
         operatorNotes: draft.operatorNotes,
       });
+      const persistedRunnerResult = {
+        ...runnerResult,
+        raw: undefined,
+      };
       const judgeResult = await this.options.providers.judge.judgeRun({
         testCase,
         run: draft,
-        runnerResult,
+        runnerResult: persistedRunnerResult,
       });
       const completedAt = new Date().toISOString();
       const completed: AiTestRunRecord = {
         ...draft,
         status: "completed",
-        runnerResult,
+        runnerResult: persistedRunnerResult,
         judgeResult,
         completedAt,
       };

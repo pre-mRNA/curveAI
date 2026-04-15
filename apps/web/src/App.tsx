@@ -28,7 +28,7 @@ function OnboardingLanding() {
           <div className="meta-row">
             <span className="pill accent">Invite-gated</span>
             <span className="pill">Browser voice</span>
-            <span className="pill">Resume-friendly</span>
+            <span className="pill">Single secure session</span>
           </div>
         </header>
 
@@ -61,7 +61,7 @@ function OnboardingLanding() {
             <div className="card">
               <div className="card-inner onboarding-stage">
                 <div className="eyebrow">Open the session</div>
-                <h2>Paste the invite code to continue or resume onboarding.</h2>
+                <h2>Paste the invite code to open the onboarding session.</h2>
                 <p className="muted">
                   If someone opens the onboarding Pages hostname directly, they can still recover the live flow from here.
                 </p>
@@ -83,7 +83,7 @@ function OnboardingLanding() {
                     <button className="button" type="submit" disabled={!inviteCode.trim()}>
                       Open onboarding
                     </button>
-                    <span className="muted">The same invite can resume an in-progress session on this device.</span>
+                    <span className="muted">Keep the original tab open until the onboarding flow is complete.</span>
                   </div>
                 </form>
               </div>
@@ -98,7 +98,7 @@ function OnboardingLanding() {
                 <ul className="guide-list">
                   <li>Have microphone access ready for the voice sample.</li>
                   <li>Finish the consent boxes before starting the interview.</li>
-                  <li>Return to the same invite to resume the session later.</li>
+                  <li>Keep the same browser tab open while the secure session is active.</li>
                 </ul>
               </div>
             </div>

@@ -35,10 +35,11 @@
   ],
   "vars": {
     "PUBLIC_OPS_APP_URL": "https://curve-ai-ops.pages.dev",
+    "PUBLIC_STAFF_APP_URL": "https://curve-ai-staff.pages.dev",
     "PUBLIC_ONBOARDING_APP_URL": "https://curve-ai-onboarding.pages.dev",
     "PUBLIC_UPLOAD_APP_URL": "https://curve-ai-upload.pages.dev",
     "PUBLIC_API_URL": "https://curve-ai-api-staging.workers.dev",
-    "ALLOWED_ORIGINS": "https://curve-ai-ops.pages.dev,https://curve-ai-onboarding.pages.dev,https://curve-ai-upload.pages.dev",
+    "ALLOWED_ORIGINS": "https://curve-ai-ops.pages.dev,https://curve-ai-staff.pages.dev,https://curve-ai-onboarding.pages.dev,https://curve-ai-upload.pages.dev",
     "REASONING_PROVIDER": "heuristic"
   }
 }

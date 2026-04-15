@@ -128,7 +128,6 @@ export interface OnboardingFinalizeResponse {
 
 export interface PhotoAsset {
   id: string;
-  url: string;
   caption: string;
 }
 

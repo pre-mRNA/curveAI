@@ -228,7 +228,7 @@ export class HttpReasoningProvider implements ReasoningProvider {
         authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify({
-        session,
+        session: sanitizeSessionForReasoning(session),
         turns,
         checklist: onboardingChecklist.map(({ keywords: _keywords, ...item }) => item),
       }),
@@ -248,6 +248,42 @@ export class HttpReasoningProvider implements ReasoningProvider {
       review: payload.review,
     };
   }
+}
+
+function sanitizeSessionForReasoning(session: OnboardingSessionRecord) {
+  return {
+    id: session.id,
+    staffId: session.staffId,
+    staffName: session.staffName,
+    status: session.status,
+    expiresAt: session.expiresAt,
+    consentAccepted: session.consentAccepted,
+    cloneConsentAccepted: session.cloneConsentAccepted,
+    updatedAt: session.updatedAt,
+    analysis: session.analysis,
+    review: session.review,
+    calendar: session.calendar
+      ? {
+          provider: session.calendar.provider,
+          mode: session.calendar.mode,
+          status: session.calendar.status,
+          calendarLabel: session.calendar.calendarLabel,
+          connectedAt: session.calendar.connectedAt,
+        }
+      : undefined,
+    voiceSample: session.voiceSample
+      ? {
+          sampleLabel: session.voiceSample.sampleLabel,
+          recommendedForClone: session.voiceSample.recommendedForClone,
+          qualityScore: session.voiceSample.qualityScore,
+          reasons: session.voiceSample.reasons,
+          durationSeconds: session.voiceSample.durationSeconds,
+          originalName: session.voiceSample.originalName,
+          mimeType: session.voiceSample.mimeType,
+          capturedAt: session.voiceSample.capturedAt,
+        }
+      : undefined,
+  };
 }
 
 function collectMatches(turns: Array<{ text: string }>, keywords: string[]): string[] {

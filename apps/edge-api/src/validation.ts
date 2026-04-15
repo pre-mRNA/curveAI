@@ -107,7 +107,7 @@ export const staffOtpVerificationInputSchema = z
   .object({
     staffId: z.string().min(1).optional(),
     inviteToken: z.string().min(16),
-    otpCode: z.string().min(4),
+    otpCode: z.string().regex(/^\d{6}$/),
   })
   .strict();
 

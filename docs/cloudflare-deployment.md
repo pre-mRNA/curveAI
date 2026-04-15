@@ -14,7 +14,9 @@ Do not treat this app as "static Pages only". The product needs server-side secr
 - `D1` stores durable relational state for staff, invites, onboarding sessions, jobs, quotes, uploads, and provider metadata.
 - `R2` stores photos, voice samples, and other artifacts.
 - `Durable Objects` coordinate live onboarding sessions and any turn-order sensitive flow.
-- `Cloudflare Access` protects the internal ops Pages app in staging; the onboarding and customer upload apps stay public but token-gated.
+- `Cloudflare Access` is the preferred protection layer for staging review across the Pages apps and Worker API.
+- A Pages Functions review-passcode gate is now included as a fallback when Zero Trust Access is not configured yet.
+  It protects the Pages apps themselves, but it does not fully replace Access for the cross-origin Worker API.
 
 ## Canonical Bindings And Env Vars
 
@@ -31,8 +33,7 @@ Use these as the deployment contract for the Worker:
 - `ALLOWED_ORIGINS` - comma-separated CORS allowlist for the Pages origins
 - `ADMIN_TOKEN` - admin auth for internal routes
 - `AUTOMATION_SHARED_SECRET` - HMAC secret for automation and voice routes
-- `ASSET_SIGNING_SECRET` - HMAC secret for signed photo asset URLs
-- `ALLOW_INSECURE_TEST_OTP` - optional `true` only for local/staging when the admin invite route should echo raw OTP codes before Twilio Verify exists
+- `ALLOW_INSECURE_TEST_OTP` - optional `true` only for isolated local development when the admin invite route should echo raw OTP codes before Twilio Verify exists
 - `ELEVENLABS_API_KEY` - ElevenLabs provider key
 - `ELEVENLABS_AGENT_ID` - ElevenLabs browser agent identifier
 - `REASONING_PROVIDER` - `mock`, `hosted`, or `openai-compatible`
@@ -45,6 +46,10 @@ When they are added later, keep them server-side only and wire them through the 
 Use these as the deployment contract for each Pages app:
 
 - `VITE_API_BASE_URL` - absolute Worker origin compiled into the app bundle
+- `REVIEW_PASSCODE` - fallback Pages review-passcode gate
+- `REVIEW_COOKIE_SECRET` - cookie-signing secret for the fallback Pages review-passcode gate
+
+Keep `.wrangler/` state and `.dev.vars*` files local-only and gitignored. Miniflare D1/R2/DO state can contain staff records, uploads, and transcripts.
 
 The Pages apps no longer rely on `/api` same-origin behavior in production.
 Their build scripts will warn locally when `VITE_API_BASE_URL` is missing and should fail in Pages or strict builds.
@@ -52,6 +57,7 @@ Their build scripts will warn locally when `VITE_API_BASE_URL` is missing and sh
 Use this env var for migration and deploy scripts:
 
 - `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
+- `CLOUDFLARE_D1_DATABASE_ID` - actual D1 database id used by the env-driven Worker deploy script
 
 ## Why This Replaces Fly
 
@@ -73,6 +79,9 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - Use dedicated Pages projects for onboarding, ops, and uploads, plus a separate Worker route for the API.
 - Keep provider callbacks and signed upload endpoints reachable through the API origin, but still state-bound and token-checked.
 - Keep the three public app URLs and the API URL explicit so the browser never depends on same-origin assumptions.
+- If Access is not configured yet, set `REVIEW_PASSCODE` and `REVIEW_COOKIE_SECRET` on each Pages project to enable the fallback review gate.
+- That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
+- The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
 
 ## Local Development
 
@@ -81,14 +90,18 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - Use `npm run dev:staff-web` for the staff-facing browser app.
 - For local Pages builds, set `VITE_API_BASE_URL=http://127.0.0.1:8787`.
 - For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
+- For Worker deploys, the checked-in `apps/edge-api/wrangler.jsonc` stays template-like and `npm run deploy:edge-api` renders a temporary config from `CLOUDFLARE_D1_DATABASE_ID` before calling `wrangler deploy`.
+- `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
 - Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
 - Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.
+- The repo now includes `wrangler.jsonc` files for each Pages app plus `npm run deploy:pages:onboarding`, `deploy:pages:ops`, `deploy:pages:staff`, `deploy:pages:upload`, and `deploy:cloudflare:staging`.
 
 ## Notes
 
 - Static Pages alone is not enough for this product.
-- The deployment target is Cloudflare-only, and the repo now includes Worker implementations for health, dashboard auth, browser onboarding, Microsoft callback handling, upload token/photo flows, signed photo assets, and the current voice tool endpoints including post-call ingestion.
+- The deployment target is Cloudflare-only, and the repo now includes Worker implementations for health, dashboard auth, browser onboarding, Microsoft callback handling, upload token/photo flows, authenticated photo assets, and the current voice tool endpoints including post-call ingestion.
+- Automation signatures are route-bound now: callers sign `timestamp.method.path.rawBody`, not just `timestamp.rawBody`.
 - The staff browser app currently replaces the native iOS surface for live queue testing; it should be treated as a first-class Pages deployment in CORS and environment setup.
 - The AI test studio now depends on the same Worker origin and admin token flow as the ops dashboard, so it should be treated as part of the protected internal Pages surface rather than a separate local-only tool.
 - `/health` now reports worker readiness warnings when required public URLs or signing secrets are missing, and non-local requests fail fast when the worker is misconfigured.

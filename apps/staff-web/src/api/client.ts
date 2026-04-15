@@ -17,7 +17,6 @@ function createHeaders(initHeaders?: HeadersInit, sessionToken?: string): Header
   const headers = new Headers(initHeaders ?? {});
   if (sessionToken) {
     headers.set('Authorization', `Bearer ${sessionToken}`);
-    headers.set('X-Staff-Session', sessionToken);
   }
   return headers;
 }
@@ -47,6 +46,18 @@ async function requestJson<T>(path: string, init?: RequestInit, sessionToken?: s
   }
 
   return (responseText ? JSON.parse(responseText) : null) as T;
+}
+
+export async function fetchProtectedAsset(photoId: string, sessionToken: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/assets/photos/${encodeURIComponent(photoId)}`, {
+    headers: createHeaders(undefined, sessionToken),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, `Protected asset request failed: ${response.status}`);
+  }
+
+  return response.blob();
 }
 
 export async function verifyStaffOtp(input: {

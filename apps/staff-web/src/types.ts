@@ -46,7 +46,6 @@ export interface StaffProfile {
 
 export interface PhotoAsset {
   id: string;
-  url: string;
   caption: string;
 }
 
@@ -123,7 +122,6 @@ export interface JobCard {
     photos: Array<{
       id: string;
       filename: string;
-      url?: string;
       caption?: string;
       uploadedAt: string;
     }>;
@@ -147,7 +145,6 @@ export interface JobCard {
   photos: Array<{
     id: string;
     filename: string;
-    url?: string;
     caption?: string;
     uploadedAt: string;
   }>;

@@ -3,9 +3,6 @@ import { resolveApiBaseUrl } from './baseUrl';
 const API_BASE_URL = resolveApiBaseUrl();
 
 export type UploadRequestSummary = {
-  token: string;
-  jobId: string;
-  notes?: string;
   fileCount: number;
   status: string;
   expiresAt: string;

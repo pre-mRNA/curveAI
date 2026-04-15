@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 
 import { apiClient, ApiError } from './api/client';
+import { ProtectedImage } from './ProtectedImage';
 import { clearAdminToken, readAdminToken, saveAdminToken } from './lib/adminToken';
 import type {
   AiTestCase,
@@ -357,7 +358,7 @@ function DashboardAuthPanel({
             <input
               id="admin-token"
               className="text-input"
-              type="text"
+              type="password"
               value={tokenDraft}
               onChange={(event) => onTokenDraftChange(event.target.value)}
               autoComplete="off"
@@ -650,7 +651,7 @@ function DashboardPage() {
                         <div className="photo-row">
                           {job.photos.map((photo) => (
                             <figure className="photo" key={photo.id}>
-                              <img src={photo.url} alt={photo.caption} />
+                              <ProtectedImage photoId={photo.id} adminToken={storedToken} alt={photo.caption} />
                               <figcaption>{photo.caption}</figcaption>
                             </figure>
                           ))}

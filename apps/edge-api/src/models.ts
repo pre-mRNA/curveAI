@@ -204,7 +204,6 @@ export interface JobPhoto {
   id: string;
   jobId: string;
   filename: string;
-  url?: string;
   caption?: string;
   mimeType?: string;
   objectKey?: string;
@@ -303,7 +302,6 @@ export interface JobCardEnvelope {
 
 export interface DashboardPhoto {
   id: string;
-  url: string;
   caption: string;
 }
 

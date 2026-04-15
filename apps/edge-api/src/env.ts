@@ -12,7 +12,6 @@ export interface EdgeApiEnv {
   ALLOWED_ORIGINS?: string;
   ADMIN_TOKEN?: string;
   AUTOMATION_SHARED_SECRET?: string;
-  ASSET_SIGNING_SECRET?: string;
   ALLOW_INSECURE_TEST_OTP?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_AGENT_ID?: string;
@@ -47,7 +46,6 @@ export interface AppConfig {
   warnings: string[];
   adminToken?: string;
   automationSharedSecret?: string;
-  photoAccessSecret?: string;
   allowInsecureTestOtp: boolean;
   realtimeVoiceMode: "mock" | "configured";
   reasoningMode: "mock" | "hosted" | "openai-compatible";
@@ -97,6 +95,9 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
   if (!env.PUBLIC_OPS_APP_URL) {
     warnings.push("PUBLIC_OPS_APP_URL is not configured; the worker is using a fallback origin.");
   }
+  if (!env.PUBLIC_STAFF_APP_URL) {
+    warnings.push("PUBLIC_STAFF_APP_URL is not configured; the worker is not advertising a dedicated staff origin.");
+  }
   if (!env.PUBLIC_ONBOARDING_APP_URL && !env.PUBLIC_APP_URL) {
     warnings.push("PUBLIC_ONBOARDING_APP_URL is not configured; the worker is using a fallback origin.");
   }
@@ -108,9 +109,6 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
   }
   if (!env.AUTOMATION_SHARED_SECRET) {
     warnings.push("AUTOMATION_SHARED_SECRET is not configured.");
-  }
-  if (!env.ASSET_SIGNING_SECRET) {
-    warnings.push("ASSET_SIGNING_SECRET is not configured.");
   }
   if (
     !isLocalUrl(publicApiUrl) &&
@@ -130,7 +128,6 @@ export function getConfig(env: EdgeApiEnv): AppConfig {
     warnings,
     adminToken: env.ADMIN_TOKEN,
     automationSharedSecret: env.AUTOMATION_SHARED_SECRET,
-    photoAccessSecret: env.ASSET_SIGNING_SECRET,
     allowInsecureTestOtp: env.ALLOW_INSECURE_TEST_OTP === "true",
     realtimeVoiceMode: env.ELEVENLABS_API_KEY && env.ELEVENLABS_AGENT_ID ? "configured" : "mock",
     reasoningMode:

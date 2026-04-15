@@ -23,6 +23,10 @@ function mockJsonResponse(body: unknown, status = 200) {
   });
 }
 
+function byTextContent(expected: string) {
+  return (_content: string, node: Element | null) => node?.textContent?.trim() === expected;
+}
+
 describe('upload app', () => {
   const fetchMock = vi.fn();
 
@@ -42,8 +46,6 @@ describe('upload app', () => {
       mockJsonResponse({
         ok: true,
         upload: {
-          token: 'job_123',
-          jobId: 'job_123',
           fileCount: 0,
           status: 'pending',
           expiresAt: '2026-04-16T00:00:00.000Z',
@@ -55,7 +57,7 @@ describe('upload app', () => {
     renderRoute('/upload/job_123');
 
     const fileInput = screen.getByLabelText(/photo files/i);
-    expect(await screen.findByText(/0 already uploaded/i)).toBeInTheDocument();
+    expect(await screen.findByText(byTextContent('0 already uploaded'))).toBeInTheDocument();
     expect(fileInput).toHaveAttribute('accept', PHOTO_UPLOAD_ACCEPT);
     expect(fileInput.getAttribute('accept') ?? '').not.toContain('.pdf');
   });
@@ -64,13 +66,10 @@ describe('upload app', () => {
     fetchMock
       .mockResolvedValueOnce(
         mockJsonResponse({
-          ok: true,
-          upload: {
-            token: 'job_123',
-            jobId: 'job_123',
-            notes: 'Show the damaged fittings and the switchboard.',
-            fileCount: 0,
-            status: 'pending',
+        ok: true,
+        upload: {
+          fileCount: 0,
+          status: 'pending',
             expiresAt: '2026-04-16T00:00:00.000Z',
           },
         }),
@@ -80,8 +79,7 @@ describe('upload app', () => {
     const user = userEvent.setup();
 
     renderRoute('/upload/job_123');
-
-    expect(await screen.findByText(/show the damaged fittings and the switchboard/i)).toBeInTheDocument();
+    expect(await screen.findByText(byTextContent('0 already uploaded'))).toBeInTheDocument();
 
     const file = new File(['image'], 'photo.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(/photo files/i), file);
@@ -100,7 +98,9 @@ describe('upload app', () => {
     expect(String(requestUrl)).toContain('/uploads/job_123/photos');
     expect(init?.method).toBe('POST');
     expect(await screen.findByText(/uploaded 1 photo successfully/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 already uploaded/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(byTextContent('1 already uploaded'))).toBeInTheDocument();
+    });
   });
 
   it('shows selected files and allows clearing them before upload', async () => {
@@ -108,8 +108,6 @@ describe('upload app', () => {
       mockJsonResponse({
         ok: true,
         upload: {
-          token: 'job_123',
-          jobId: 'job_123',
           fileCount: 0,
           status: 'pending',
           expiresAt: '2026-04-16T00:00:00.000Z',
@@ -121,7 +119,7 @@ describe('upload app', () => {
 
     renderRoute('/upload/job_123');
 
-    await screen.findByText(/0 already uploaded/i);
+    await screen.findByText(byTextContent('0 already uploaded'));
 
     const file = new File(['image'], 'site-photo.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(/photo files/i), file);
@@ -139,7 +137,7 @@ describe('upload app', () => {
 
     renderRoute('/upload/job_123');
 
-    expect(await screen.findByText(/upload link has expired/i)).toBeInTheDocument();
+    expect(await screen.findByText(/this upload link has expired\./i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload photos/i })).toBeDisabled();
   });
 

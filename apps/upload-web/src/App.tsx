@@ -3,6 +3,13 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { ApiError, getUploadRequest, uploadPhotos, type UploadRequestSummary } from './api/client';
 import { PHOTO_UPLOAD_ACCEPT, isSupportedPhotoFile } from './lib/upload';
 
+function maskToken(value: string) {
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
 function UploadLanding() {
   return (
     <div className="shell">
@@ -170,10 +177,9 @@ function UploadPage() {
             <div className="eyebrow">Customer Upload</div>
             <h1>Send your photos to the tradie.</h1>
             <div className="meta-row">
-              <span className="pill accent">Token <code>{token || 'missing'}</code></span>
+              <span className="pill accent">Secure link <code>{token ? maskToken(token) : 'missing'}</code></span>
               {uploadRequest ? <span className="pill">{uploadRequest.fileCount} already uploaded</span> : null}
             </div>
-            {uploadRequest?.notes ? <p className="muted">{uploadRequest.notes}</p> : null}
 
             <div className="upload-panel">
               <div className="upload-panel-copy">

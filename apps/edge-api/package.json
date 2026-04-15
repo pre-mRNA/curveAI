@@ -9,7 +9,7 @@
     "dev": "wrangler dev",
     "migrate:d1:local": "node ../../scripts/run-d1-migrations.mjs --local",
     "migrate:d1:remote": "node ../../scripts/run-d1-migrations.mjs --remote",
-    "deploy": "npm run migrate:d1:remote && wrangler deploy",
+    "deploy": "node ../../scripts/deploy-edge-api.mjs",
     "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

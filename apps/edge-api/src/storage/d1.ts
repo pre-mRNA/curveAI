@@ -29,6 +29,7 @@ import {
   type VoiceSampleAssessment,
 } from "../models.js";
 import { createDefaultAnalysis, normalizeReview } from "../models.js";
+import { sha256Hex } from "../crypto.js";
 import type {
   AppointmentUpsertInput,
   StaffCalendarConnectionInput,
@@ -475,6 +476,16 @@ function previewQuote(job: JobRecord): QuoteRecord {
     createdAt: job.updatedAt,
     updatedAt: job.updatedAt,
   };
+}
+
+function redactUploadLink(uploadLink: string): string {
+  try {
+    const url = new URL(uploadLink);
+    url.pathname = url.pathname.replace(/\/upload\/[^/]+$/u, "/upload/[redacted]");
+    return url.toString();
+  } catch {
+    return "[redacted upload link]";
+  }
 }
 
 function rowToJob(row: JobRow): JobRecord {
@@ -1417,6 +1428,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
   async createUploadRequest(input: UploadRequestInput): Promise<UploadRequestRecord> {
     const now = new Date().toISOString();
     const token = input.token ?? globalThis.crypto.randomUUID().replace(/-/g, "");
+    const tokenHash = await sha256Hex(token);
     const jobId = input.jobId ?? `job_${token.slice(0, 8)}`;
     const job = await this.ensureJob({
       id: jobId,
@@ -1456,12 +1468,12 @@ export class D1OnboardingRepository implements OnboardingRepository {
           file_count = excluded.file_count`,
       )
       .bind(
-        record.token,
+        tokenHash,
         record.jobId,
         record.staffId ?? null,
         record.callerPhone ?? null,
         record.notes ?? null,
-        record.uploadLink,
+        redactUploadLink(record.uploadLink),
         record.status,
         record.createdAt,
         record.expiresAt,
@@ -1474,16 +1486,22 @@ export class D1OnboardingRepository implements OnboardingRepository {
   }
 
   async getUploadRequest(token: string): Promise<UploadRequestRecord | undefined> {
-    const row = await this.db
-      .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
-      .bind(token)
-      .first<UploadRequestRow>();
+    const tokenHash = await sha256Hex(token);
+    const row =
+      (await this.db
+        .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+        .bind(tokenHash)
+        .first<UploadRequestRow>()) ??
+      (await this.db
+        .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+        .bind(token)
+        .first<UploadRequestRow>());
     if (!row) {
       return undefined;
     }
     const files = await this.listPhotosByUploadToken(token);
     return {
-      token: row.token,
+      token,
       jobId: row.job_id,
       staffId: row.staff_id ?? undefined,
       callerPhone: row.caller_phone ?? undefined,
@@ -1499,10 +1517,16 @@ export class D1OnboardingRepository implements OnboardingRepository {
   }
 
   async completeUploadRequest(token: string, photos: JobPhoto[]): Promise<UploadRequestRecord | undefined> {
-    const row = await this.db
-      .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
-      .bind(token)
-      .first<UploadRequestRow>();
+    const tokenHash = await sha256Hex(token);
+    const row =
+      (await this.db
+        .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+        .bind(tokenHash)
+        .first<UploadRequestRow>()) ??
+      (await this.db
+        .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+        .bind(token)
+        .first<UploadRequestRow>());
     if (!row) {
       return undefined;
     }
@@ -1521,7 +1545,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
          SET status = ?, completed_at = ?, file_count = ?
          WHERE token = ? AND status = ? AND expires_at > ?`,
       )
-      .bind("completed", now, nextFileCount, token, "pending", now)
+      .bind("completed", now, nextFileCount, row.token, "pending", now)
       .run();
     if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
       return undefined;
@@ -1535,7 +1559,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
         .bind(
           photo.id,
           photo.jobId,
-          token,
+          tokenHash,
           photo.filename,
           photo.objectKey ?? photo.id,
           photo.mimeType ?? null,
@@ -1571,6 +1595,16 @@ export class D1OnboardingRepository implements OnboardingRepository {
       .bind(photoId)
       .first<PhotoRow>();
     return row ? rowToPhoto(row) : undefined;
+  }
+
+  async claimAutomationReplay(fingerprint: string, expiresAt: string): Promise<boolean> {
+    const now = new Date().toISOString();
+    await this.db.prepare(`DELETE FROM automation_request_replays WHERE expires_at <= ?`).bind(now).run();
+    const result = await this.db
+      .prepare(`INSERT OR IGNORE INTO automation_request_replays (fingerprint, expires_at, created_at) VALUES (?, ?, ?)`)
+      .bind(fingerprint, expiresAt, now)
+      .run();
+    return Boolean(result.meta.changes);
   }
 
   async listAiTestCases(): Promise<AiTestCaseRecord[]> {
@@ -1687,9 +1721,10 @@ export class D1OnboardingRepository implements OnboardingRepository {
   }
 
   private async listPhotosByUploadToken(token: string): Promise<JobPhoto[]> {
+    const tokenHash = await sha256Hex(token);
     const rows = await this.db
-      .prepare(`SELECT * FROM crm_photo_assets WHERE upload_token = ? ORDER BY uploaded_at ASC`)
-      .bind(token)
+      .prepare(`SELECT * FROM crm_photo_assets WHERE upload_token IN (?, ?) ORDER BY uploaded_at ASC`)
+      .bind(tokenHash, token)
       .all<PhotoRow>();
     return (rows.results ?? []).map(rowToPhoto);
   }

@@ -431,6 +431,20 @@ a:focus-visible {
   border: 1px solid rgba(24, 33, 41, 0.08);
 }
 
+.photo-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 16px;
+  text-align: center;
+  font-size: 0.84rem;
+  color: var(--muted);
+  border-radius: 16px;
+  border: 1px solid rgba(24, 33, 41, 0.08);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(220, 227, 236, 0.92));
+}
+
 .quote-item,
 .call-item,
 .judge-item,

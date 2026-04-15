@@ -154,30 +154,44 @@ describe('ops console', () => {
     const headers = new Headers(init?.headers);
 
     expect(headers.get('authorization')).toBe('Bearer bad-token');
-    expect(headers.get('x-admin-token')).toBe('bad-token');
+    expect(headers.get('x-admin-token')).toBeNull();
     expect(authState.clearAdminToken).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/admin token rejected/i)).toBeInTheDocument();
   });
 
   it('renders the operational queue after a successful load', async () => {
-    fetchMock.mockResolvedValueOnce(
-      mockJsonResponse({
-        jobs: [
-          {
-            id: 'job_1',
-            customerName: 'Sam Taylor',
-            suburb: 'Marrickville',
-            summary: 'Inspect the ceiling leak and quote the roof repair.',
-            status: 'quoted',
-            photos: [{ id: 'photo_1', url: '/photo-1.jpg', caption: 'Water damage in the lounge' }],
-            quote: {
-              basePrice: 1200,
-              strategyAdjustment: 80,
-              experimentAdjustment: -20,
-              presentedPrice: 1260,
-              confidence: 'high',
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/dashboard')) {
+        return mockJsonResponse({
+          jobs: [
+            {
+              id: 'job_1',
+              customerName: 'Sam Taylor',
+              suburb: 'Marrickville',
+              summary: 'Inspect the ceiling leak and quote the roof repair.',
+              status: 'quoted',
+              photos: [{ id: 'photo_1', caption: 'Water damage in the lounge' }],
+              quote: {
+                basePrice: 1200,
+                strategyAdjustment: 80,
+                experimentAdjustment: -20,
+                presentedPrice: 1260,
+                confidence: 'high',
+              },
+              callback: {
+                id: 'cb_1',
+                customerName: 'Sam Taylor',
+                phone: '0400 111 222',
+                reason: 'Confirm quote and repair timing',
+                status: 'queued',
+                dueAt: 'Today 2:00 PM',
+              },
+              updatedAt: '2026-04-15 09:30',
             },
-            callback: {
+          ],
+          callbacks: [
+            {
               id: 'cb_1',
               customerName: 'Sam Taylor',
               phone: '0400 111 222',
@@ -185,30 +199,32 @@ describe('ops console', () => {
               status: 'queued',
               dueAt: 'Today 2:00 PM',
             },
-            updatedAt: '2026-04-15 09:30',
+          ],
+          experiments: [
+            {
+              name: 'Quote anchor test',
+              variant: 'control',
+              exposure: '48%',
+              lift: '+2.1%',
+              sampleSize: 84,
+            },
+          ],
+        });
+      }
+
+      if (url.endsWith('/assets/photos/photo_1')) {
+        const headers = new Headers(init?.headers);
+        expect(headers.get('authorization')).toBe('Bearer good-token');
+        return new Response('image-bytes', {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/jpeg',
           },
-        ],
-        callbacks: [
-          {
-            id: 'cb_1',
-            customerName: 'Sam Taylor',
-            phone: '0400 111 222',
-            reason: 'Confirm quote and repair timing',
-            status: 'queued',
-            dueAt: 'Today 2:00 PM',
-          },
-        ],
-        experiments: [
-          {
-            name: 'Quote anchor test',
-            variant: 'control',
-            exposure: '48%',
-            lift: '+2.1%',
-            sampleSize: 84,
-          },
-        ],
-      }),
-    );
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
     const user = userEvent.setup();
 
     renderRoute('/');

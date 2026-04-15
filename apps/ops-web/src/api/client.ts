@@ -23,7 +23,6 @@ function createHeaders(initHeaders?: HeadersInit, adminToken?: string): Headers 
   const headers = new Headers(initHeaders ?? {});
   if (adminToken) {
     headers.set('Authorization', `Bearer ${adminToken}`);
-    headers.set('X-Admin-Token', adminToken);
   }
   return headers;
 }
@@ -56,6 +55,18 @@ async function requestJson<T>(path: string, adminToken: string, init?: RequestIn
 }
 
 export const apiClient = {
+  async fetchProtectedAsset(photoId: string, adminToken: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/assets/photos/${encodeURIComponent(photoId)}`, {
+      headers: createHeaders(undefined, adminToken),
+    });
+
+    if (!response.ok) {
+      throw new ApiError(response.status, `Protected asset request failed: ${response.status}`);
+    }
+
+    return response.blob();
+  },
+
   async getDashboard(adminToken: string): Promise<DashboardPayload> {
     try {
       return await requestJson<DashboardPayload>('/dashboard', adminToken);

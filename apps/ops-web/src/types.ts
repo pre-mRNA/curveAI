@@ -6,7 +6,6 @@ export type PricingExperimentVariant = 'control' | 'dynamic-low' | 'dynamic-high
 
 export interface PhotoAsset {
   id: string;
-  url: string;
   caption: string;
 }
 
