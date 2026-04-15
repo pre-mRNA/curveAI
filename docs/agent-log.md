@@ -51,3 +51,7 @@
 - Fixed the next review round on onboarding state integrity: onboarding session tokens now expire, completed sessions reject further mutation, configured Microsoft callbacks require a real auth code, and review identity fields now persist instead of disappearing on save.
 - Added a persistent Cloudflare deployment note recommending `Pages + Worker API` for the web surface while keeping the orchestration core portable and removing Fly from the target topology.
 - Added `apps/edge-api`, a buildable Cloudflare Worker API with Hono, D1-backed repository scaffolding, R2 artifact storage, Durable Object session coordination, provider adapters, and tests for the browser onboarding happy path.
+- Split the browser surface into three Cloudflare Pages apps: `apps/web` for onboarding, `apps/ops-web` for the internal dashboard, and `apps/upload-web` for customer photo uploads.
+- Migrated the Cloudflare Worker beyond onboarding so it now serves dashboard/job-card reads, voice quote/callback/appointment/send-photo-link tools, signed photo asset URLs, customer photo uploads, and `voice/post-call` ingestion.
+- Reworked the Worker runtime so production requests use real Cloudflare bindings instead of silently falling back to in-memory state, and updated the deployment contract/docs to use separate ops/onboarding/upload origins.
+- Added the D1 CRM migration for jobs, quotes, appointments, callbacks, calls, upload requests, and photo assets, plus Worker tests covering the Cloudflare upload flow and post-call persistence.

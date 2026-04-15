@@ -1,5 +1,6 @@
 export interface ObjectStore {
   put(key: string, value: Blob | ArrayBuffer | ArrayBufferView, options?: { contentType?: string }): Promise<string>;
+  get(key: string): Promise<{ blob: Blob; contentType?: string } | undefined>;
 }
 
 export class R2ObjectStore implements ObjectStore {
@@ -10,6 +11,17 @@ export class R2ObjectStore implements ObjectStore {
       httpMetadata: options?.contentType ? { contentType: options.contentType } : undefined,
     });
     return key;
+  }
+
+  async get(key: string): Promise<{ blob: Blob; contentType?: string } | undefined> {
+    const object = await this.bucket.get(key);
+    if (!object) {
+      return undefined;
+    }
+    return {
+      blob: await object.blob(),
+      contentType: object.httpMetadata?.contentType ?? undefined,
+    };
   }
 }
 
@@ -27,5 +39,17 @@ export class InMemoryObjectStore implements ObjectStore {
     }
     this.objects.set(key, { bytes, contentType: options?.contentType });
     return key;
+  }
+
+  async get(key: string): Promise<{ blob: Blob; contentType?: string } | undefined> {
+    const object = this.objects.get(key);
+    if (!object) {
+      return undefined;
+    }
+    const buffer = Uint8Array.from(object.bytes).buffer;
+    return {
+      blob: new Blob([buffer], { type: object.contentType }),
+      contentType: object.contentType,
+    };
   }
 }

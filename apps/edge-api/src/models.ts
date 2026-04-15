@@ -182,10 +182,201 @@ export interface OnboardingChecklistPrompt {
   prompt: string;
 }
 
+export type JobStatus = "new" | "quoted" | "scheduled" | "callback" | "closed";
+export type DashboardJobStatus = "new" | "quoted" | "booked" | "needs_follow_up" | "completed";
+export type CallbackTaskStatus = "open" | "queued" | "done" | "cancelled";
+export type DashboardCallbackStatus = "queued" | "contacted" | "closed";
+export type QuoteStatus = "draft" | "presented" | "accepted" | "rejected";
+export type AppointmentStatus = "proposed" | "booked" | "rescheduled" | "cancelled";
+export type ExperimentVariant = "control" | "dynamic-low" | "dynamic-high";
+
+export interface JobLocation {
+  label?: string;
+  address?: string;
+  suburb?: string;
+  state?: string;
+  postcode?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface JobPhoto {
+  id: string;
+  jobId: string;
+  filename: string;
+  url?: string;
+  caption?: string;
+  mimeType?: string;
+  objectKey?: string;
+  uploadedAt: string;
+}
+
+export interface QuoteRecord {
+  id: string;
+  jobId: string;
+  staffId?: string;
+  amount: number;
+  currency: string;
+  variant: ExperimentVariant;
+  basePrice: number;
+  strategyAdjustment: number;
+  experimentAdjustment: number;
+  floorPrice: number;
+  ceilingPrice: number;
+  confidence: number;
+  status: QuoteStatus;
+  rationale: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppointmentRecord {
+  id: string;
+  jobId: string;
+  staffId?: string;
+  status: AppointmentStatus;
+  startAt?: string;
+  endAt?: string;
+  timezone?: string;
+  location?: string;
+  notes?: string;
+  outlookEventId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CallbackTaskRecord {
+  id: string;
+  jobId?: string;
+  staffId?: string;
+  status: CallbackTaskStatus;
+  reason?: string;
+  dueAt?: string;
+  phoneNumber?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CallRecord {
+  id: string;
+  staffId?: string;
+  callerPhone?: string;
+  direction: "inbound" | "outbound";
+  status: "received" | "in_progress" | "completed" | "callback_requested" | "transferred" | "abandoned";
+  transcript?: string;
+  summary?: string;
+  disposition?: string;
+  jobId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobRecord {
+  id: string;
+  staffId?: string;
+  callerId?: string;
+  callerName?: string;
+  callerPhone?: string;
+  callerEmail?: string;
+  address?: string;
+  location?: JobLocation;
+  issue?: string;
+  summary?: string;
+  status: JobStatus;
+  quote?: QuoteRecord;
+  appointment?: AppointmentRecord;
+  callbackTask?: CallbackTaskRecord;
+  photos: JobPhoto[];
+  calls: CallRecord[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobCardEnvelope {
+  job: JobRecord;
+  staff?: StaffProfileSummary;
+  quotes: QuoteRecord[];
+  photos: JobPhoto[];
+  calls: CallRecord[];
+}
+
+export interface DashboardPhoto {
+  id: string;
+  url: string;
+  caption: string;
+}
+
+export interface DashboardQuote {
+  basePrice: number;
+  strategyAdjustment: number;
+  experimentAdjustment: number;
+  presentedPrice: number;
+  confidence: "low" | "medium" | "high";
+}
+
+export interface DashboardCallback {
+  id: string;
+  customerName: string;
+  phone: string;
+  reason: string;
+  status: DashboardCallbackStatus;
+  dueAt: string;
+}
+
+export interface DashboardJob {
+  id: string;
+  customerName: string;
+  suburb: string;
+  summary: string;
+  status: DashboardJobStatus;
+  photos: DashboardPhoto[];
+  quote: DashboardQuote;
+  callback?: DashboardCallback | null;
+  updatedAt: string;
+}
+
+export interface DashboardExperiment {
+  name: string;
+  variant: ExperimentVariant;
+  exposure: string;
+  lift: string;
+  sampleSize: number;
+}
+
 export interface DashboardPayload {
-  jobs: unknown[];
-  callbacks: unknown[];
-  experiments: unknown[];
+  jobs: DashboardJob[];
+  callbacks: DashboardCallback[];
+  experiments: DashboardExperiment[];
+}
+
+export interface StaffProfileSummary {
+  id: string;
+  fullName: string;
+  phoneNumber?: string;
+  email?: string;
+  role?: string;
+  timezone?: string;
+  companyName?: string;
+  calendarProvider?: string;
+  outlookCalendarId?: string;
+  voiceCloneId?: string;
+  updatedAt?: string;
+}
+
+export interface UploadRequestRecord {
+  token: string;
+  jobId: string;
+  staffId?: string;
+  callerPhone?: string;
+  notes?: string;
+  uploadLink: string;
+  status: "pending" | "completed" | "expired";
+  createdAt: string;
+  expiresAt: string;
+  completedAt?: string;
+  fileCount: number;
+  files: JobPhoto[];
 }
 
 export function createDefaultReview(fullName?: string, role?: string): ExtractionReview {

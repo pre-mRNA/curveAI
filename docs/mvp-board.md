@@ -4,7 +4,7 @@
 
 - Provider adapters: replace mock ElevenLabs browser, Microsoft calendar, and Twilio behavior with live clients behind the existing onboarding and voice routes.
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
-- Cloudflare deployment: finish migrating the remaining Express-only route families onto the new Worker API so staging can drop Fly completely.
+- Cloudflare deployment: finish the last legacy staff/iOS auth routes or move the SwiftUI client onto the onboarding-native Worker contracts so staging can drop the Express reference completely.
 - Security hardening: add content sniffing for uploads and move from file-backed CRM persistence to a real database.
 
 ## Next
@@ -26,9 +26,13 @@
 - Added backend guardrails so onboarding cannot mint a realtime session without consent or finalize without a connected calendar and a real audio sample.
 - Documented the Cloudflare-only deployment target, binding model, staging topology, and the migration away from Fly in the persistent project docs.
 - Added a buildable Cloudflare Worker package with Hono routing, D1/R2/DO bindings, live/mock ElevenLabs browser-session issuance, onboarding route parity for the web flow, and Worker tests covering the finalized onboarding path.
+- Split the Cloudflare browser surface into dedicated onboarding, ops, and upload Pages apps.
+- Migrated Worker-side dashboard, job-card, signed-photo, upload, voice tool, and post-call routes so the main browser flows no longer depend on the Express reference API.
+- Added D1 CRM tables and Worker coverage for Cloudflare-native photo upload and post-call persistence.
 
 ## Review Queue
 
 - Move the API-side onboarding serializers onto shared schemas directly so the route payloads and shared contracts cannot drift at runtime.
 - Revisit admin-token auth for the web console before production; session storage is better than local storage, but not a final control plane auth story.
 - Revisit OTP issuance and transport once Twilio Verify is wired in; the current in-house flow is an MVP guardrail, not a final identity solution.
+- Decide whether the SwiftUI app should keep the legacy `/staff/*` OTP/session flow or switch to the newer onboarding-session model before removing the Express reference API.

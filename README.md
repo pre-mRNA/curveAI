@@ -6,13 +6,15 @@ Curve AI is a greenfield platform for tradie-focused voice agents, dynamic quoti
 
 The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
 Cloudflare deployment guidance for the onboarding app is in [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md).
-The current deployment target is Cloudflare Pages for the web app plus a Cloudflare Worker API, replacing the earlier Fly-hosted staging shape.
+The current deployment target is Cloudflare Pages for the split browser apps plus a Cloudflare Worker API, replacing the earlier Fly-hosted staging shape.
 
 ## Workspace
 
 - `apps/api`: existing Express API scaffold for voice-control routes, lightweight CRM behavior, uploads, and local development reference
-- `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, D1/R2/DO bindings, and Worker-native provider adapters
-- `apps/web`: internal ops console, browser staff onboarding, and customer photo upload flow
+- `apps/edge-api`: Cloudflare Worker API for staging deployment, browser onboarding, ops/dashboard routes, voice tools, signed photo delivery, D1/R2/DO bindings, and Worker-native provider adapters
+- `apps/web`: public onboarding app
+- `apps/ops-web`: internal ops dashboard
+- `apps/upload-web`: public customer photo upload app
 - `apps/ios`: native SwiftUI staff app
 - `packages/shared`: shared domain models, onboarding contracts, and pricing logic
 - `docs/mvp-board.md`: local Kanban board for active MVP work
@@ -23,11 +25,11 @@ The current deployment target is Cloudflare Pages for the web app plus a Cloudfl
 2. Install workspace dependencies with `npm install`.
 3. Start the Express reference API with `npm run dev:api` if you need the older local stack.
 4. Start the Cloudflare Worker API with `npm run dev:edge-api` for the current deployment target.
-5. Start the web console with `npm run dev:web`.
+5. Start the onboarding app with `npm run dev:web`, the ops dashboard with `npm run dev:ops-web`, or the upload app with `npm run dev:upload-web`.
 6. Open the iOS app from `apps/ios/TradieAI.xcodeproj`.
 7. Run Express API tests with `npm run test:api`.
 8. Run Worker API tests with `npm run test:edge-api`.
-9. Run web tests with `npm run test -w @curve-ai/web`.
+9. Run web tests with `npm run test:web`, `npm run test:ops-web`, and `npm run test:upload-web`.
 
 ## Auth Model
 
@@ -36,7 +38,7 @@ The current deployment target is Cloudflare Pages for the web app plus a Cloudfl
 - Browser onboarding uses an invite code to mint a session-specific onboarding token, then requires explicit recording and clone consent before issuing a realtime voice session.
 - Browser onboarding cannot finalize until calendar connect and a real audio voice sample are both present.
 - Staff app auth still uses invite + OTP, then mints a short-lived staff session token for iOS requests.
-- Customer photo uploads use opaque upload tokens and are rejected before file writes if the token is missing or expired.
+- Customer photo uploads use opaque upload tokens, live on the dedicated upload Pages app, store artifacts in R2 through the Worker, and expose photos back to ops through signed Worker asset URLs.
 
 ## Onboarding
 
@@ -44,6 +46,7 @@ The current deployment target is Cloudflare Pages for the web app plus a Cloudfl
 - The browser flow runs consent -> interview -> extraction review -> Microsoft calendar connect -> clean voice sample -> finalize.
 - API reasoning, realtime voice, calendar, and clone behavior sit behind provider interfaces so the control plane can move toward self-hosted Australian infrastructure later without rewriting the product flow.
 - Onboarding session bearer tokens now expire with the invite window, completed sessions are immutable, and configured Microsoft callbacks require a real auth code instead of trusting query-string identity data.
+- The Cloudflare Worker now owns dashboard reads, job cards, upload token/photo flows, signed photo assets, and `voice/post-call` ingestion in addition to onboarding.
 
 ## Verification
 
@@ -59,4 +62,4 @@ The current deployment target is Cloudflare Pages for the web app plus a Cloudfl
 - Local secrets are expected in an untracked `secrets` or `secrets.local.env` file.
 - Do not commit provider keys, Twilio credentials, or Outlook OAuth secrets.
 - Production secrets should be moved to managed secret stores.
-- The web console now keeps the admin token in session storage instead of long-lived local storage.
+- The ops dashboard now keeps the admin token in session storage instead of long-lived local storage.

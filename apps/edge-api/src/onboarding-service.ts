@@ -80,7 +80,7 @@ export class OnboardingService {
     };
     await this.options.repo.createInvite(invite);
 
-    const url = new URL(`/onboard/${invite.code}`, this.options.config.publicAppUrl);
+    const url = new URL(`/onboard/${invite.code}`, this.options.config.publicOnboardingAppUrl);
     return {
       invite,
       url: url.toString(),
@@ -369,6 +369,8 @@ export class OnboardingService {
       this.options.repo.upsertStaffProfile({
         staffId: session.staffId,
         fullName: effectiveName,
+        phoneNumber: invite?.phoneNumber,
+        email: invite?.email,
         role: session.review.staffProfile.role || undefined,
         companyName: session.review.staffProfile.companyName || undefined,
         calendarProvider: session.review.staffProfile.calendarProvider || undefined,

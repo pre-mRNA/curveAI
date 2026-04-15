@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createApp } from "../src/app.js";
+import { signHmacSha256 } from "../src/crypto.js";
 import type { EdgeApiEnv } from "../src/env.js";
 import { InMemoryOnboardingRepository } from "../src/storage/memory.js";
 import { InMemoryObjectStore } from "../src/storage/artifacts.js";
@@ -12,16 +13,44 @@ function authHeaders(token: string): HeadersInit {
   };
 }
 
+function baseEnv(overrides: Partial<EdgeApiEnv> = {}): EdgeApiEnv {
+  return {
+    ADMIN_TOKEN: "admin-secret",
+    AUTOMATION_SHARED_SECRET: "automation-secret",
+    ASSET_SIGNING_SECRET: "asset-secret",
+    PUBLIC_OPS_APP_URL: "https://curve-ai-ops.pages.dev",
+    PUBLIC_ONBOARDING_APP_URL: "https://curve-ai-onboarding.pages.dev",
+    PUBLIC_UPLOAD_APP_URL: "https://curve-ai-upload.pages.dev",
+    PUBLIC_API_URL: "https://curve-ai-api-staging.workers.dev",
+    ALLOWED_ORIGINS: "https://curve-ai-ops.pages.dev,https://curve-ai-onboarding.pages.dev,https://curve-ai-upload.pages.dev",
+    ...overrides,
+  };
+}
+
+function createTestApp(overrides: Partial<EdgeApiEnv> = {}) {
+  return createApp({
+    env: baseEnv(overrides),
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+}
+
+async function automationHeaders(secret: string, body: unknown): Promise<HeadersInit> {
+  const timestamp = Date.now().toString();
+  const payload = JSON.stringify(body);
+  const signature = await signHmacSha256(secret, `${timestamp}.${payload}`);
+  return {
+    "Content-Type": "application/json",
+    "X-Curve-Timestamp": timestamp,
+    "X-Curve-Signature": `sha256=${signature}`,
+  };
+}
+
 test("worker onboarding flow reaches finalized state", async () => {
   const repo = new InMemoryOnboardingRepository();
   const objectStore = new InMemoryObjectStore();
   const app = createApp({
-    env: {
-      ADMIN_TOKEN: "admin-secret",
-      PUBLIC_APP_URL: "https://curve-ai-staging.pages.dev",
-      PUBLIC_API_URL: "https://curve-ai-api-staging.workers.dev",
-      ALLOWED_ORIGIN: "https://curve-ai-staging.pages.dev",
-    } satisfies EdgeApiEnv,
+    env: baseEnv(),
     repo,
     objectStore,
   });
@@ -165,13 +194,7 @@ test("worker onboarding flow reaches finalized state", async () => {
 });
 
 test("health reports worker runtime and provider modes", async () => {
-  const app = createApp({
-    env: {
-      PUBLIC_APP_URL: "https://curve-ai-staging.pages.dev",
-      PUBLIC_API_URL: "https://curve-ai-api-staging.workers.dev",
-      ALLOWED_ORIGIN: "https://curve-ai-staging.pages.dev",
-    },
-  });
+  const app = createTestApp();
 
   const response = await app.request("/health");
   assert.equal(response.status, 200);
@@ -190,10 +213,9 @@ test("health reports worker runtime and provider modes", async () => {
 test("worker blocks realtime session issuance without both consents", async () => {
   const repo = new InMemoryOnboardingRepository();
   const app = createApp({
-    env: {
-      ADMIN_TOKEN: "admin-secret",
-    } satisfies EdgeApiEnv,
+    env: baseEnv(),
     repo,
+    objectStore: new InMemoryObjectStore(),
   });
 
   const inviteResponse = await app.request("/onboarding/invites", {
@@ -230,4 +252,109 @@ test("worker blocks realtime session issuance without both consents", async () =
     }),
   });
   assert.equal(denied.status, 400);
+});
+
+test("worker fails fast when Cloudflare bindings are missing", () => {
+  assert.throws(() => createApp({ env: { ADMIN_TOKEN: "admin-secret" } }), /Cloudflare D1 binding `DB` is required/);
+});
+
+test("customer upload flow stays on Cloudflare routes and produces signed photo assets", async () => {
+  const app = createTestApp();
+  const photoLinkHeaders = await automationHeaders("automation-secret", {
+    callerPhone: "+61400000000",
+    notes: "Send photos of the unit and pressure valve.",
+  });
+
+  const linkResponse = await app.request("/voice/tools/send-photo-link", {
+    method: "POST",
+    headers: photoLinkHeaders,
+    body: JSON.stringify({
+      callerPhone: "+61400000000",
+      notes: "Send photos of the unit and pressure valve.",
+    }),
+  });
+  assert.equal(linkResponse.status, 200);
+  const linkBody = (await linkResponse.json()) as {
+    uploadRequest: { token: string; uploadLink: string; jobId: string };
+  };
+  assert.match(linkBody.uploadRequest.uploadLink, /^https:\/\/curve-ai-upload\.pages\.dev\/upload\//);
+
+  const uploadForm = new FormData();
+  uploadForm.append("photos", new File(["binary-image"], "water-heater.jpg", { type: "image/jpeg" }));
+  const uploadResponse = await app.request(`/uploads/${linkBody.uploadRequest.token}/photos`, {
+    method: "POST",
+    body: uploadForm,
+  });
+  assert.equal(uploadResponse.status, 200);
+  const uploadBody = (await uploadResponse.json()) as {
+    upload: { status: string; fileCount: number };
+    photos: Array<{ id: string }>;
+  };
+  assert.equal(uploadBody.upload.status, "completed");
+  assert.equal(uploadBody.upload.fileCount, 1);
+
+  const dashboardResponse = await app.request("/dashboard", {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+  assert.equal(dashboardResponse.status, 200);
+  const dashboard = (await dashboardResponse.json()) as {
+    jobs: Array<{ id: string; photos: Array<{ id: string; url: string }> }>;
+  };
+  assert.equal(dashboard.jobs.length, 1);
+  assert.equal(dashboard.jobs[0]?.photos.length, 1);
+
+  const signedPhotoUrl = dashboard.jobs[0]?.photos[0]?.url;
+  assert.ok(signedPhotoUrl);
+  const parsedPhotoUrl = new URL(signedPhotoUrl);
+  assert.equal(parsedPhotoUrl.origin, "https://curve-ai-api-staging.workers.dev");
+  const photoResponse = await app.request(`${parsedPhotoUrl.pathname}${parsedPhotoUrl.search}`);
+  assert.equal(photoResponse.status, 200);
+  assert.equal(photoResponse.headers.get("content-type"), "image/jpeg");
+});
+
+test("voice post-call writes call records into the Worker CRM store", async () => {
+  const app = createTestApp();
+  const headers = await automationHeaders("automation-secret", {
+    callId: "call_123",
+    staffId: "staff_123",
+    callerPhone: "+61411111111",
+    summary: "Customer requested an urgent callback.",
+    status: "callback_requested",
+    direction: "inbound",
+  });
+
+  const response = await app.request("/voice/post-call", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      callId: "call_123",
+      staffId: "staff_123",
+      callerPhone: "+61411111111",
+      summary: "Customer requested an urgent callback.",
+      status: "callback_requested",
+      direction: "inbound",
+    }),
+  });
+  assert.equal(response.status, 201);
+  const body = (await response.json()) as {
+    call: { id: string; jobId?: string; status: string };
+    job?: { id: string; status: string };
+  };
+  assert.equal(body.call.id, "call_123");
+  assert.equal(body.call.status, "callback_requested");
+  assert.ok(body.job?.id);
+
+  const jobCardResponse = await app.request(`/jobs/${body.job?.id}/card`, {
+    headers: {
+      Authorization: "Bearer admin-secret",
+    },
+  });
+  assert.equal(jobCardResponse.status, 200);
+  const jobCard = (await jobCardResponse.json()) as {
+    card: { calls: Array<{ id: string; status: string }> };
+  };
+  assert.equal(jobCard.card.calls.length, 1);
+  assert.equal(jobCard.card.calls[0]?.id, "call_123");
 });

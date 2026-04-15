@@ -1,16 +1,29 @@
 import type {
+  AppointmentRecord,
+  CallbackTaskRecord,
+  CallRecord,
   DashboardPayload,
+  DashboardExperiment,
   InterviewTurn,
   InviteRecord,
+  JobCardEnvelope,
+  JobPhoto,
+  JobRecord,
+  QuoteRecord,
   OnboardingSessionRecord,
+  StaffProfileSummary,
+  UploadRequestRecord,
 } from "../models.js";
 
 export interface StaffProfileUpsertInput {
   staffId: string;
   fullName: string;
+  phoneNumber?: string;
+  email?: string;
   role?: string;
   companyName?: string;
   calendarProvider?: string;
+  timezone?: string;
   communication: unknown;
   pricing: unknown;
   business: unknown;
@@ -31,8 +44,39 @@ export interface PricingInterviewRecordInput {
   capturedAt: string;
 }
 
+export interface JobUpsertInput extends Partial<JobRecord> {
+  id: string;
+}
+
+export interface QuoteUpsertInput extends Partial<QuoteRecord> {
+  jobId: string;
+  amount: number;
+  currency: string;
+}
+
+export interface AppointmentUpsertInput extends Partial<AppointmentRecord> {
+  jobId: string;
+}
+
+export interface CallbackUpsertInput extends Partial<CallbackTaskRecord> {
+  jobId?: string;
+}
+
+export interface CallUpsertInput extends Partial<CallRecord> {
+  jobId?: string;
+}
+
+export interface UploadRequestInput {
+  token?: string;
+  jobId?: string;
+  staffId?: string;
+  callerPhone?: string;
+  notes?: string;
+  uploadLink: string;
+  expiresAt: string;
+}
+
 export interface OnboardingRepository {
-  getDashboard(): Promise<DashboardPayload>;
   createInvite(invite: InviteRecord): Promise<void>;
   saveInvite(invite: InviteRecord): Promise<void>;
   getInviteByCode(code: string): Promise<InviteRecord | undefined>;
@@ -45,4 +89,17 @@ export interface OnboardingRepository {
   upsertStaffProfile(input: StaffProfileUpsertInput): Promise<void>;
   recordVoiceConsent(input: VoiceConsentRecordInput): Promise<void>;
   savePricingInterview(input: PricingInterviewRecordInput): Promise<void>;
+  listJobs(staffId?: string): Promise<JobRecord[]>;
+  getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;
+  listCallbacks(staffId?: string): Promise<CallbackTaskRecord[]>;
+  listExperiments(): Promise<DashboardExperiment[]>;
+  ensureJob(input: JobUpsertInput): Promise<JobRecord>;
+  upsertQuote(input: QuoteUpsertInput): Promise<QuoteRecord>;
+  upsertAppointment(input: AppointmentUpsertInput): Promise<AppointmentRecord>;
+  upsertCallback(input: CallbackUpsertInput): Promise<CallbackTaskRecord>;
+  recordCall(input: CallUpsertInput): Promise<CallRecord>;
+  createUploadRequest(input: UploadRequestInput): Promise<UploadRequestRecord>;
+  getUploadRequest(token: string): Promise<UploadRequestRecord | undefined>;
+  completeUploadRequest(token: string, photos: JobPhoto[]): Promise<UploadRequestRecord | undefined>;
+  getPhotoAsset(photoId: string): Promise<JobPhoto | undefined>;
 }

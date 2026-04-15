@@ -1,19 +1,33 @@
-import type {
-  CalendarConnectionSummary,
-  DashboardPayload,
-  ExtractionReview,
-  InterviewTurn,
-  InviteRecord,
-  OnboardingAnalysis,
-  OnboardingSessionRecord,
-  RealtimeVoiceSession,
-  VoiceSampleAssessment,
+import {
+  type AppointmentRecord,
+  type CallbackTaskRecord,
+  type CallRecord,
+  type DashboardExperiment,
+  type DashboardPayload,
+  type InterviewTurn,
+  type InviteRecord,
+  type JobCardEnvelope,
+  type JobLocation,
+  type JobPhoto,
+  type JobRecord,
+  type OnboardingAnalysis,
+  type OnboardingSessionRecord,
+  type QuoteRecord,
+  type StaffProfileSummary,
+  type UploadRequestRecord,
+  type VoiceSampleAssessment,
 } from "../models.js";
 import { createDefaultAnalysis, normalizeReview } from "../models.js";
 import type {
+  AppointmentUpsertInput,
+  CallbackUpsertInput,
+  CallUpsertInput,
+  JobUpsertInput,
   OnboardingRepository,
   PricingInterviewRecordInput,
+  QuoteUpsertInput,
   StaffProfileUpsertInput,
+  UploadRequestInput,
   VoiceConsentRecordInput,
 } from "./repository.js";
 
@@ -60,13 +74,166 @@ interface TurnRow {
   created_at: string;
 }
 
-function parseJson<T>(value: string | null | undefined): T | undefined;
-function parseJson<T>(value: string | null | undefined, fallback: T): T;
+interface StaffProfileRow {
+  staff_id: string;
+  full_name: string;
+  phone_number: string | null;
+  email: string | null;
+  role: string | null;
+  timezone: string | null;
+  company_name: string | null;
+  calendar_provider: string | null;
+  updated_at: string;
+}
+
+interface JobRow {
+  id: string;
+  staff_id: string | null;
+  caller_id: string | null;
+  caller_name: string | null;
+  caller_phone: string | null;
+  caller_email: string | null;
+  address: string | null;
+  location_json: string | null;
+  issue: string | null;
+  summary: string | null;
+  status: JobRecord["status"];
+  quote_json: string | null;
+  appointment_json: string | null;
+  callback_json: string | null;
+  photos_json: string | null;
+  calls_json: string | null;
+  proposed_next_action: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface QuoteRow {
+  id: string;
+  job_id: string;
+  staff_id: string | null;
+  variant: QuoteRecord["variant"];
+  base_price: number;
+  strategy_adjustment: number;
+  experiment_adjustment: number;
+  presented_price: number;
+  floor_price: number;
+  ceiling_price: number;
+  confidence: number;
+  status: QuoteRecord["status"];
+  rationale_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AppointmentRow {
+  id: string;
+  job_id: string;
+  staff_id: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: AppointmentRecord["status"];
+  calendar_event_id: string | null;
+  location: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CallbackRow {
+  id: string;
+  job_id: string | null;
+  staff_id: string | null;
+  status: CallbackTaskRecord["status"];
+  reason: string | null;
+  due_at: string | null;
+  phone_number: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CallRow {
+  id: string;
+  job_id: string | null;
+  staff_id: string | null;
+  caller_phone: string | null;
+  direction: CallRecord["direction"];
+  status: CallRecord["status"];
+  transcript: string | null;
+  summary: string | null;
+  disposition: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PhotoRow {
+  id: string;
+  job_id: string;
+  upload_token: string | null;
+  filename: string;
+  object_key: string;
+  mime_type: string | null;
+  caption: string | null;
+  uploaded_at: string;
+}
+
+interface UploadRequestRow {
+  token: string;
+  job_id: string;
+  staff_id: string | null;
+  caller_phone: string | null;
+  notes: string | null;
+  upload_link: string;
+  status: UploadRequestRecord["status"];
+  created_at: string;
+  expires_at: string;
+  completed_at: string | null;
+  file_count: number;
+}
+
+interface ExperimentRow {
+  id: string;
+  name: string;
+  variant: DashboardExperiment["variant"];
+  exposure: string;
+  lift: string;
+  sample_size: number;
+}
+
+const dashboardExperiments: DashboardExperiment[] = [
+  {
+    name: "After-hours urgency premium",
+    variant: "dynamic-high",
+    exposure: "34%",
+    lift: "+9% revenue",
+    sampleSize: 148,
+  },
+  {
+    name: "Short-job close-out discount",
+    variant: "control",
+    exposure: "48%",
+    lift: "Baseline",
+    sampleSize: 214,
+  },
+  {
+    name: "Customer-acquired photo uplift",
+    variant: "dynamic-low",
+    exposure: "18%",
+    lift: "+5% conversion",
+    sampleSize: 93,
+  },
+];
+
 function parseJson<T>(value: string | null | undefined, fallback?: T): T | undefined {
   if (!value) {
     return fallback;
   }
-  return JSON.parse(value) as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function toInvite(row: InviteRow): InviteRecord {
@@ -99,25 +266,229 @@ function toSession(row: SessionRow): OnboardingSessionRecord {
     cloneConsentAccepted: Boolean(row.clone_consent_accepted),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    analysis: parseJson<OnboardingAnalysis>(row.analysis_json, createDefaultAnalysis()),
-    review: parseJson<ExtractionReview>(row.review_json, normalizeReview(undefined)),
-    voiceSession: parseJson<RealtimeVoiceSession>(row.voice_session_json),
-    calendar: parseJson<CalendarConnectionSummary>(row.calendar_json),
+    analysis: parseJson<OnboardingAnalysis>(row.analysis_json, createDefaultAnalysis()) ?? createDefaultAnalysis(),
+    review: parseJson(row.review_json, normalizeReview(undefined)) ?? normalizeReview(undefined),
+    voiceSession: parseJson(row.voice_session_json),
+    calendar: parseJson(row.calendar_json),
     voiceSample: parseJson<VoiceSampleAssessment>(row.voice_sample_json),
     finalizedAt: row.finalized_at ?? undefined,
   };
 }
 
+function toJobLocation(value: JobLocation | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.label ?? value.suburb ?? value.address;
+}
+
+function defaultJobSummary(job: JobRecord): string {
+  return job.summary ?? job.issue ?? "Awaiting call summary";
+}
+
+function toDashboardConfidence(confidence: number): DashboardPayload["jobs"][number]["quote"]["confidence"] {
+  if (confidence >= 0.84) {
+    return "high";
+  }
+  if (confidence >= 0.68) {
+    return "medium";
+  }
+  return "low";
+}
+
+function toDashboardStatus(status: JobRecord["status"]): DashboardPayload["jobs"][number]["status"] {
+  if (status === "scheduled") {
+    return "booked";
+  }
+  if (status === "callback") {
+    return "needs_follow_up";
+  }
+  if (status === "closed") {
+    return "completed";
+  }
+  return status;
+}
+
+function toDashboardJob(job: JobRecord, photoUrl: (photo: JobPhoto) => string): DashboardPayload["jobs"][number] {
+  const quote = job.quote ?? previewQuote(job);
+  const callback = job.callbackTask ? toDashboardCallback(job.callbackTask, job) : null;
+  return {
+    id: job.id,
+    customerName: job.callerName ?? "Unknown caller",
+    suburb: job.location?.label ?? job.address ?? "Unknown suburb",
+    summary: defaultJobSummary(job),
+    status: toDashboardStatus(job.status),
+    photos: job.photos.map((photo) => ({
+      id: photo.id,
+      url: photoUrl(photo),
+      caption: photo.caption ?? photo.filename ?? "Job photo",
+    })),
+    quote: {
+      basePrice: quote.basePrice,
+      strategyAdjustment: quote.strategyAdjustment,
+      experimentAdjustment: quote.experimentAdjustment,
+      presentedPrice: quote.amount,
+      confidence: toDashboardConfidence(quote.confidence),
+    },
+    callback,
+    updatedAt: new Date(job.updatedAt).toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  };
+}
+
+function toDashboardCallback(callback: CallbackTaskRecord, job?: JobRecord): DashboardPayload["callbacks"][number] {
+  return {
+    id: callback.id,
+    customerName: job?.callerName ?? "Pending caller",
+    phone: callback.phoneNumber ?? job?.callerPhone ?? "Unknown phone",
+    reason: callback.reason ?? "General follow-up",
+    status: callback.status === "done" ? "closed" : callback.status === "open" ? "contacted" : "queued",
+    dueAt:
+      callback.dueAt == null
+        ? "TBD"
+        : new Date(callback.dueAt).toLocaleString("en-AU", {
+            weekday: "short",
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+  };
+}
+
+function previewQuote(job: JobRecord): QuoteRecord {
+  const basePrice = Math.max(120, Math.round((job.summary?.length ?? 80) * 2));
+  return {
+    id: `preview-${job.id}`,
+    jobId: job.id,
+    staffId: job.staffId,
+    variant: "control",
+    amount: basePrice,
+    currency: "AUD",
+    basePrice,
+    strategyAdjustment: 0,
+    experimentAdjustment: 0,
+    floorPrice: Math.max(90, basePrice - 60),
+    ceilingPrice: basePrice + 120,
+    confidence: 0.54,
+    status: "draft",
+    rationale: ["Preview quote generated from current job context."],
+    createdAt: job.updatedAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function rowToJob(row: JobRow): JobRecord {
+  return {
+    id: row.id,
+    staffId: row.staff_id ?? undefined,
+    callerId: row.caller_id ?? undefined,
+    callerName: row.caller_name ?? undefined,
+    callerPhone: row.caller_phone ?? undefined,
+    callerEmail: row.caller_email ?? undefined,
+    address: row.address ?? undefined,
+    location: parseJson<JobLocation>(row.location_json),
+    issue: row.issue ?? undefined,
+    summary: row.summary ?? undefined,
+    status: row.status,
+    quote: parseJson<QuoteRecord>(row.quote_json),
+    appointment: parseJson<AppointmentRecord>(row.appointment_json),
+    callbackTask: parseJson<CallbackTaskRecord>(row.callback_json),
+    photos: parseJson<JobPhoto[]>(row.photos_json, []) ?? [],
+    calls: parseJson<CallRecord[]>(row.calls_json, []) ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToPhoto(row: PhotoRow): JobPhoto {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    filename: row.filename,
+    objectKey: row.object_key,
+    mimeType: row.mime_type ?? undefined,
+    caption: row.caption ?? undefined,
+    uploadedAt: row.uploaded_at,
+  };
+}
+
+function rowToCallback(row: CallbackRow): CallbackTaskRecord {
+  return {
+    id: row.id,
+    jobId: row.job_id ?? undefined,
+    staffId: row.staff_id ?? undefined,
+    status: row.status,
+    reason: row.reason ?? undefined,
+    dueAt: row.due_at ?? undefined,
+    phoneNumber: row.phone_number ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToQuote(row: QuoteRow): QuoteRecord {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    staffId: row.staff_id ?? undefined,
+    variant: row.variant,
+    amount: row.presented_price,
+    currency: "AUD",
+    basePrice: row.base_price,
+    strategyAdjustment: row.strategy_adjustment,
+    experimentAdjustment: row.experiment_adjustment,
+    floorPrice: row.floor_price,
+    ceilingPrice: row.ceiling_price,
+    confidence: row.confidence,
+    status: row.status,
+    rationale: parseJson<string[]>(row.rationale_json, []) ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToAppointment(row: AppointmentRow): AppointmentRecord {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    staffId: row.staff_id ?? undefined,
+    startAt: row.starts_at ?? undefined,
+    endAt: row.ends_at ?? undefined,
+    status: row.status,
+    outlookEventId: row.calendar_event_id ?? undefined,
+    location: row.location ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToStaff(row: StaffProfileRow): StaffProfileSummary {
+  return {
+    id: row.staff_id,
+    fullName: row.full_name,
+    phoneNumber: row.phone_number ?? undefined,
+    email: row.email ?? undefined,
+    role: row.role ?? undefined,
+    timezone: row.timezone ?? undefined,
+    companyName: row.company_name ?? undefined,
+    calendarProvider: row.calendar_provider ?? undefined,
+    updatedAt: row.updated_at,
+  };
+}
+
+function serializeLocation(location?: JobLocation): string | null {
+  return location ? JSON.stringify(location) : null;
+}
+
+function serializeJson<T>(value: T | undefined): string | null {
+  return value === undefined ? null : JSON.stringify(value);
+}
+
 export class D1OnboardingRepository implements OnboardingRepository {
   constructor(private readonly db: D1Database) {}
-
-  async getDashboard(): Promise<DashboardPayload> {
-    return {
-      jobs: [],
-      callbacks: [],
-      experiments: [],
-    };
-  }
 
   async createInvite(invite: InviteRecord): Promise<void> {
     await this.db
@@ -245,7 +616,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
       if (!row.calendar_json) {
         return false;
       }
-      const calendar = parseJson<CalendarConnectionSummary>(row.calendar_json);
+      const calendar = parseJson<{ authState?: string }>(row.calendar_json);
       return calendar?.authState === state;
     });
     return match ? toSession(match) : undefined;
@@ -279,11 +650,15 @@ export class D1OnboardingRepository implements OnboardingRepository {
     await this.db
       .prepare(
         `INSERT INTO onboarding_staff_profiles (
-          staff_id, full_name, role, company_name, calendar_provider, communication_json, pricing_json, business_json, crm_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          staff_id, full_name, phone_number, email, role, timezone, company_name, calendar_provider,
+          communication_json, pricing_json, business_json, crm_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id) DO UPDATE SET
           full_name = excluded.full_name,
+          phone_number = excluded.phone_number,
+          email = excluded.email,
           role = excluded.role,
+          timezone = excluded.timezone,
           company_name = excluded.company_name,
           calendar_provider = excluded.calendar_provider,
           communication_json = excluded.communication_json,
@@ -295,7 +670,10 @@ export class D1OnboardingRepository implements OnboardingRepository {
       .bind(
         input.staffId,
         input.fullName,
+        input.phoneNumber ?? null,
+        input.email ?? null,
         input.role ?? null,
+        input.timezone ?? null,
         input.companyName ?? null,
         input.calendarProvider ?? null,
         JSON.stringify(input.communication),
@@ -322,6 +700,634 @@ export class D1OnboardingRepository implements OnboardingRepository {
         `INSERT INTO pricing_interviews (id, staff_id, responses_json, captured_at) VALUES (?, ?, ?, ?)`,
       )
       .bind(globalThis.crypto.randomUUID(), input.staffId, JSON.stringify(input.responses), input.capturedAt)
+      .run();
+  }
+
+  async listJobs(staffId?: string): Promise<JobRecord[]> {
+    const query = staffId
+      ? this.db.prepare(`SELECT * FROM crm_jobs WHERE staff_id = ? ORDER BY updated_at DESC`).bind(staffId)
+      : this.db.prepare(`SELECT * FROM crm_jobs ORDER BY updated_at DESC`);
+    const rows = await query.all<JobRow>();
+    return (rows.results ?? []).map(rowToJob);
+  }
+
+  async getJobCard(jobId: string): Promise<JobCardEnvelope | undefined> {
+    const jobRow = await this.db
+      .prepare(`SELECT * FROM crm_jobs WHERE id = ? LIMIT 1`)
+      .bind(jobId)
+      .first<JobRow>();
+    if (!jobRow) {
+      return undefined;
+    }
+    const job = rowToJob(jobRow);
+    const staff = job.staffId ? await this.getStaffProfile(job.staffId) : undefined;
+    const quotes = await this.listQuotes(job.id);
+    const calls = job.calls;
+    return {
+      job,
+      staff,
+      quotes,
+      photos: job.photos,
+      calls,
+    };
+  }
+
+  async listCallbacks(staffId?: string): Promise<CallbackTaskRecord[]> {
+    const query = staffId
+      ? this.db.prepare(`SELECT * FROM crm_callbacks WHERE staff_id = ? ORDER BY due_at DESC`).bind(staffId)
+      : this.db.prepare(`SELECT * FROM crm_callbacks ORDER BY due_at DESC`);
+    const rows = await query.all<CallbackRow>();
+    return (rows.results ?? []).map(rowToCallback);
+  }
+
+  async listExperiments(): Promise<DashboardExperiment[]> {
+    const rows = await this.db.prepare(`SELECT * FROM dashboard_experiments ORDER BY sample_size DESC`).all<ExperimentRow>();
+    const experiments = (rows.results ?? []).map((row) => ({
+      name: row.name,
+      variant: row.variant,
+      exposure: row.exposure,
+      lift: row.lift,
+      sampleSize: row.sample_size,
+    }));
+    return experiments.length > 0 ? experiments : dashboardExperiments;
+  }
+
+  async ensureJob(input: JobUpsertInput): Promise<JobRecord> {
+    const existing = await this.db
+      .prepare(`SELECT * FROM crm_jobs WHERE id = ? LIMIT 1`)
+      .bind(input.id)
+      .first<JobRow>();
+    const now = new Date().toISOString();
+    const record: JobRecord = {
+      id: input.id,
+      staffId: input.staffId ?? existing?.staff_id ?? undefined,
+      callerId: input.callerId ?? existing?.caller_id ?? undefined,
+      callerName: input.callerName ?? existing?.caller_name ?? undefined,
+      callerPhone: input.callerPhone ?? existing?.caller_phone ?? undefined,
+      callerEmail: input.callerEmail ?? existing?.caller_email ?? undefined,
+      address: input.address ?? existing?.address ?? undefined,
+      location: input.location ? { ...input.location } : parseJson<JobLocation>(existing?.location_json),
+      issue: input.issue ?? existing?.issue ?? undefined,
+      summary: input.summary ?? existing?.summary ?? undefined,
+      status: input.status ?? existing?.status ?? "new",
+      quote: input.quote ? { ...input.quote } : parseJson<QuoteRecord>(existing?.quote_json),
+      appointment: input.appointment ? { ...input.appointment } : parseJson<AppointmentRecord>(existing?.appointment_json),
+      callbackTask: input.callbackTask ? { ...input.callbackTask } : parseJson<CallbackTaskRecord>(existing?.callback_json),
+      photos: input.photos ? [...input.photos] : parseJson<JobPhoto[]>(existing?.photos_json, []) ?? [],
+      calls: input.calls ? [...input.calls] : parseJson<CallRecord[]>(existing?.calls_json, []) ?? [],
+      createdAt: existing?.created_at ?? now,
+      updatedAt: now,
+    };
+
+    await this.db
+      .prepare(
+        `INSERT INTO crm_jobs (
+          id, staff_id, caller_id, caller_name, caller_phone, caller_email, address, location_json, issue, summary,
+          status, quote_json, appointment_json, callback_json, photos_json, calls_json, proposed_next_action,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          staff_id = excluded.staff_id,
+          caller_id = excluded.caller_id,
+          caller_name = excluded.caller_name,
+          caller_phone = excluded.caller_phone,
+          caller_email = excluded.caller_email,
+          address = excluded.address,
+          location_json = excluded.location_json,
+          issue = excluded.issue,
+          summary = excluded.summary,
+          status = excluded.status,
+          quote_json = excluded.quote_json,
+          appointment_json = excluded.appointment_json,
+          callback_json = excluded.callback_json,
+          photos_json = excluded.photos_json,
+          calls_json = excluded.calls_json,
+          proposed_next_action = excluded.proposed_next_action,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.id,
+        record.staffId ?? null,
+        record.callerId ?? null,
+        record.callerName ?? null,
+        record.callerPhone ?? null,
+        record.callerEmail ?? null,
+        record.address ?? null,
+        serializeLocation(record.location),
+        record.issue ?? null,
+        record.summary ?? null,
+        record.status,
+        serializeJson(record.quote),
+        serializeJson(record.appointment),
+        serializeJson(record.callbackTask),
+        JSON.stringify(record.photos),
+        JSON.stringify(record.calls),
+        record.summary ?? record.issue ?? "Awaiting call summary",
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+
+    return record;
+  }
+
+  async upsertQuote(input: QuoteUpsertInput): Promise<QuoteRecord> {
+    const now = new Date().toISOString();
+    const record: QuoteRecord = {
+      id: input.id ?? globalThis.crypto.randomUUID(),
+      jobId: input.jobId,
+      staffId: input.staffId,
+      amount: input.amount,
+      currency: input.currency,
+      variant: input.variant ?? "control",
+      basePrice: input.basePrice ?? input.amount,
+      strategyAdjustment: input.strategyAdjustment ?? 0,
+      experimentAdjustment: input.experimentAdjustment ?? 0,
+      floorPrice: input.floorPrice ?? Math.max(90, input.amount - 60),
+      ceilingPrice: input.ceilingPrice ?? input.amount + 120,
+      confidence: input.confidence ?? 0.5,
+      status: input.status ?? "draft",
+      rationale: input.rationale ? [...input.rationale] : [],
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO crm_quotes (
+          id, job_id, staff_id, variant, base_price, strategy_adjustment, experiment_adjustment, presented_price,
+          floor_price, ceiling_price, confidence, status, rationale_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          job_id = excluded.job_id,
+          staff_id = excluded.staff_id,
+          variant = excluded.variant,
+          base_price = excluded.base_price,
+          strategy_adjustment = excluded.strategy_adjustment,
+          experiment_adjustment = excluded.experiment_adjustment,
+          presented_price = excluded.presented_price,
+          floor_price = excluded.floor_price,
+          ceiling_price = excluded.ceiling_price,
+          confidence = excluded.confidence,
+          status = excluded.status,
+          rationale_json = excluded.rationale_json,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.id,
+        record.jobId,
+        record.staffId ?? null,
+        record.variant,
+        record.basePrice,
+        record.strategyAdjustment,
+        record.experimentAdjustment,
+        record.amount,
+        record.floorPrice,
+        record.ceilingPrice,
+        record.confidence,
+        record.status,
+        JSON.stringify(record.rationale),
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+
+    const job = await this.ensureJob({
+      id: record.jobId,
+      staffId: record.staffId,
+      quote: record,
+      status: "quoted",
+    });
+    await this.writeJob({ ...job, quote: record, status: "quoted", updatedAt: now });
+    return record;
+  }
+
+  async upsertAppointment(input: AppointmentUpsertInput): Promise<AppointmentRecord> {
+    const now = new Date().toISOString();
+    const record: AppointmentRecord = {
+      id: input.id ?? globalThis.crypto.randomUUID(),
+      jobId: input.jobId,
+      staffId: input.staffId,
+      status: input.status ?? "proposed",
+      startAt: input.startAt,
+      endAt: input.endAt,
+      timezone: input.timezone,
+      location: input.location,
+      notes: input.notes,
+      outlookEventId: input.outlookEventId,
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO crm_appointments (
+          id, job_id, staff_id, starts_at, ends_at, status, calendar_event_id, location, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          job_id = excluded.job_id,
+          staff_id = excluded.staff_id,
+          starts_at = excluded.starts_at,
+          ends_at = excluded.ends_at,
+          status = excluded.status,
+          calendar_event_id = excluded.calendar_event_id,
+          location = excluded.location,
+          notes = excluded.notes,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.id,
+        record.jobId,
+        record.staffId ?? null,
+        record.startAt ?? null,
+        record.endAt ?? null,
+        record.status,
+        record.outlookEventId ?? null,
+        record.location ?? null,
+        record.notes ?? null,
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+
+    const job = await this.ensureJob({
+      id: record.jobId,
+      staffId: record.staffId,
+      appointment: record,
+      status: record.status === "booked" ? "scheduled" : "new",
+    });
+    await this.writeJob({
+      ...job,
+      appointment: record,
+      status: record.status === "booked" ? "scheduled" : job.status,
+      updatedAt: now,
+    });
+    return record;
+  }
+
+  async upsertCallback(input: CallbackUpsertInput): Promise<CallbackTaskRecord> {
+    const now = new Date().toISOString();
+    const record: CallbackTaskRecord = {
+      id: input.id ?? globalThis.crypto.randomUUID(),
+      jobId: input.jobId,
+      staffId: input.staffId,
+      status: input.status ?? "queued",
+      reason: input.reason,
+      dueAt: input.dueAt,
+      phoneNumber: input.phoneNumber,
+      notes: input.notes,
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO crm_callbacks (
+          id, job_id, staff_id, status, reason, due_at, phone_number, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          job_id = excluded.job_id,
+          staff_id = excluded.staff_id,
+          status = excluded.status,
+          reason = excluded.reason,
+          due_at = excluded.due_at,
+          phone_number = excluded.phone_number,
+          notes = excluded.notes,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.id,
+        record.jobId ?? null,
+        record.staffId ?? null,
+        record.status,
+        record.reason ?? null,
+        record.dueAt ?? null,
+        record.phoneNumber ?? null,
+        record.notes ?? null,
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+
+    if (record.jobId) {
+      const job = await this.ensureJob({
+        id: record.jobId,
+        staffId: record.staffId,
+        callerPhone: record.phoneNumber,
+        callbackTask: record,
+        status: record.status === "done" ? "closed" : "callback",
+      });
+      await this.writeJob({
+        ...job,
+        callbackTask: record,
+        status: record.status === "done" ? "closed" : "callback",
+        updatedAt: now,
+      });
+    }
+
+    return record;
+  }
+
+  async recordCall(input: CallUpsertInput): Promise<CallRecord> {
+    const now = new Date().toISOString();
+    const record: CallRecord = {
+      id: input.id ?? globalThis.crypto.randomUUID(),
+      staffId: input.staffId,
+      callerPhone: input.callerPhone,
+      direction: input.direction ?? "inbound",
+      status: input.status ?? "received",
+      transcript: input.transcript,
+      summary: input.summary,
+      disposition: input.disposition,
+      jobId: input.jobId,
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO crm_calls (
+          id, job_id, staff_id, caller_phone, direction, status, transcript, summary, disposition, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          job_id = excluded.job_id,
+          staff_id = excluded.staff_id,
+          caller_phone = excluded.caller_phone,
+          direction = excluded.direction,
+          status = excluded.status,
+          transcript = excluded.transcript,
+          summary = excluded.summary,
+          disposition = excluded.disposition,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.id,
+        record.jobId ?? null,
+        record.staffId ?? null,
+        record.callerPhone ?? null,
+        record.direction,
+        record.status,
+        record.transcript ?? null,
+        record.summary ?? null,
+        record.disposition ?? null,
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+
+    if (record.jobId) {
+      const job = await this.ensureJob({
+        id: record.jobId,
+        staffId: record.staffId,
+        callerPhone: record.callerPhone,
+      });
+      const calls = [...job.calls, record];
+      await this.writeJob({
+        ...job,
+        calls,
+        summary: record.summary ?? job.summary,
+        status: record.status === "callback_requested" ? "callback" : record.status === "completed" ? "closed" : job.status,
+        updatedAt: now,
+      });
+    }
+
+    return record;
+  }
+
+  async createUploadRequest(input: UploadRequestInput): Promise<UploadRequestRecord> {
+    const now = new Date().toISOString();
+    const token = input.token ?? globalThis.crypto.randomUUID().replace(/-/g, "");
+    const jobId = input.jobId ?? `job_${token.slice(0, 8)}`;
+    const job = await this.ensureJob({
+      id: jobId,
+      staffId: input.staffId,
+      callerPhone: input.callerPhone,
+      summary: input.notes ?? "Customer photo upload received.",
+      status: "new",
+    });
+    const record: UploadRequestRecord = {
+      token,
+      jobId: job.id,
+      staffId: input.staffId,
+      callerPhone: input.callerPhone,
+      notes: input.notes,
+      uploadLink: input.uploadLink,
+      status: "pending",
+      createdAt: now,
+      expiresAt: input.expiresAt,
+      fileCount: 0,
+      files: [],
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO crm_upload_requests (
+          token, job_id, staff_id, caller_phone, notes, upload_link, status, created_at, expires_at, completed_at, file_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(token) DO UPDATE SET
+          job_id = excluded.job_id,
+          staff_id = excluded.staff_id,
+          caller_phone = excluded.caller_phone,
+          notes = excluded.notes,
+          upload_link = excluded.upload_link,
+          status = excluded.status,
+          created_at = excluded.created_at,
+          expires_at = excluded.expires_at,
+          completed_at = excluded.completed_at,
+          file_count = excluded.file_count`,
+      )
+      .bind(
+        record.token,
+        record.jobId,
+        record.staffId ?? null,
+        record.callerPhone ?? null,
+        record.notes ?? null,
+        record.uploadLink,
+        record.status,
+        record.createdAt,
+        record.expiresAt,
+        null,
+        record.fileCount,
+      )
+      .run();
+    await this.writeJob(job);
+    return record;
+  }
+
+  async getUploadRequest(token: string): Promise<UploadRequestRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+      .bind(token)
+      .first<UploadRequestRow>();
+    if (!row) {
+      return undefined;
+    }
+    const files = await this.listPhotosByUploadToken(token);
+    return {
+      token: row.token,
+      jobId: row.job_id,
+      staffId: row.staff_id ?? undefined,
+      callerPhone: row.caller_phone ?? undefined,
+      notes: row.notes ?? undefined,
+      uploadLink: row.upload_link,
+      status: row.status,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      completedAt: row.completed_at ?? undefined,
+      fileCount: row.file_count,
+      files,
+    };
+  }
+
+  async completeUploadRequest(token: string, photos: JobPhoto[]): Promise<UploadRequestRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM crm_upload_requests WHERE token = ? LIMIT 1`)
+      .bind(token)
+      .first<UploadRequestRow>();
+    if (!row) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const request = await this.getUploadRequest(token);
+    if (!request) {
+      return undefined;
+    }
+    for (const photo of photos) {
+      await this.db
+        .prepare(
+          `INSERT INTO crm_photo_assets (id, job_id, upload_token, filename, object_key, mime_type, caption, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          photo.id,
+          photo.jobId,
+          token,
+          photo.filename,
+          photo.objectKey ?? photo.id,
+          photo.mimeType ?? null,
+          photo.caption ?? null,
+          photo.uploadedAt,
+        )
+        .run();
+    }
+    const updatedRequest: UploadRequestRecord = {
+      ...request,
+      status: "completed",
+      completedAt: now,
+      fileCount: request.fileCount + photos.length,
+      files: [...request.files, ...photos],
+    };
+    await this.db
+      .prepare(
+        `UPDATE crm_upload_requests
+         SET status = ?, completed_at = ?, file_count = ?
+         WHERE token = ?`,
+      )
+      .bind("completed", now, updatedRequest.fileCount, token)
+      .run();
+
+    const job = await this.getJobById(request.jobId);
+    if (job) {
+      const nextPhotos = [...job.photos, ...photos];
+      await this.writeJob({
+        ...job,
+        photos: nextPhotos,
+        updatedAt: now,
+      });
+    }
+
+    return updatedRequest;
+  }
+
+  async getPhotoAsset(photoId: string): Promise<JobPhoto | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM crm_photo_assets WHERE id = ? LIMIT 1`)
+      .bind(photoId)
+      .first<PhotoRow>();
+    return row ? rowToPhoto(row) : undefined;
+  }
+
+  private async listPhotosByUploadToken(token: string): Promise<JobPhoto[]> {
+    const rows = await this.db
+      .prepare(`SELECT * FROM crm_photo_assets WHERE upload_token = ? ORDER BY uploaded_at ASC`)
+      .bind(token)
+      .all<PhotoRow>();
+    return (rows.results ?? []).map(rowToPhoto);
+  }
+
+  private async listQuotes(jobId: string): Promise<QuoteRecord[]> {
+    const rows = await this.db
+      .prepare(`SELECT * FROM crm_quotes WHERE job_id = ? ORDER BY created_at ASC`)
+      .bind(jobId)
+      .all<QuoteRow>();
+    return (rows.results ?? []).map(rowToQuote);
+  }
+
+  private async getJobById(jobId: string): Promise<JobRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM crm_jobs WHERE id = ? LIMIT 1`)
+      .bind(jobId)
+      .first<JobRow>();
+    return row ? rowToJob(row) : undefined;
+  }
+
+  private async getStaffProfile(staffId: string): Promise<StaffProfileSummary | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM onboarding_staff_profiles WHERE staff_id = ? LIMIT 1`)
+      .bind(staffId)
+      .first<StaffProfileRow>();
+    return row ? rowToStaff(row) : undefined;
+  }
+
+  private async writeJob(job: JobRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO crm_jobs (
+          id, staff_id, caller_id, caller_name, caller_phone, caller_email, address, location_json, issue, summary,
+          status, quote_json, appointment_json, callback_json, photos_json, calls_json, proposed_next_action,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          staff_id = excluded.staff_id,
+          caller_id = excluded.caller_id,
+          caller_name = excluded.caller_name,
+          caller_phone = excluded.caller_phone,
+          caller_email = excluded.caller_email,
+          address = excluded.address,
+          location_json = excluded.location_json,
+          issue = excluded.issue,
+          summary = excluded.summary,
+          status = excluded.status,
+          quote_json = excluded.quote_json,
+          appointment_json = excluded.appointment_json,
+          callback_json = excluded.callback_json,
+          photos_json = excluded.photos_json,
+          calls_json = excluded.calls_json,
+          proposed_next_action = excluded.proposed_next_action,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        job.id,
+        job.staffId ?? null,
+        job.callerId ?? null,
+        job.callerName ?? null,
+        job.callerPhone ?? null,
+        job.callerEmail ?? null,
+        job.address ?? null,
+        serializeLocation(job.location),
+        job.issue ?? null,
+        job.summary ?? null,
+        job.status,
+        serializeJson(job.quote),
+        serializeJson(job.appointment),
+        serializeJson(job.callbackTask),
+        JSON.stringify(job.photos ?? []),
+        JSON.stringify(job.calls ?? []),
+        job.summary ?? job.issue ?? "Awaiting call summary",
+        job.createdAt,
+        job.updatedAt,
+      )
       .run();
   }
 }

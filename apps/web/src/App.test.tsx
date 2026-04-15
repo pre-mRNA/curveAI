@@ -1,30 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { PHOTO_UPLOAD_ACCEPT, isSupportedPhotoFile } from './lib/upload';
-
-const authState = vi.hoisted(() => {
-  const state = { token: '' };
-
-  return {
-    state,
-    readAdminToken: vi.fn(() => state.token),
-    saveAdminToken: vi.fn((token: string) => {
-      state.token = token;
-    }),
-    clearAdminToken: vi.fn(() => {
-      state.token = '';
-    }),
-  };
-});
-
-vi.mock('./lib/adminToken', () => ({
-  ADMIN_TOKEN_STORAGE_KEY: 'curve-ai.admin-token',
-  readAdminToken: authState.readAdminToken,
-  saveAdminToken: authState.saveAdminToken,
-  clearAdminToken: authState.clearAdminToken,
-}));
 
 import App from './App';
 
@@ -36,74 +12,19 @@ function renderRoute(initialPath: string) {
   );
 }
 
-function mockJsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-}
-
-describe('dashboard auth', () => {
-  const fetchMock = vi.fn();
-
-  beforeEach(() => {
-    authState.state.token = '';
-    authState.readAdminToken.mockClear();
-    authState.saveAdminToken.mockClear();
-    authState.clearAdminToken.mockClear();
-    fetchMock.mockReset();
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('waits for an admin token before requesting the dashboard', () => {
+describe('onboarding app routing', () => {
+  it('shows the onboarding landing page at the root route', () => {
     renderRoute('/');
 
-    expect(screen.getByRole('heading', { name: /sign in with your admin token/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/admin token/i)).toHaveValue('');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(screen.getByText(/invite-gated/i)).toBeInTheDocument();
   });
 
-  it('sends the admin token and surfaces rejected auth', async () => {
-    fetchMock.mockResolvedValueOnce(mockJsonResponse({ error: 'unauthorized' }, 401));
-    const user = userEvent.setup();
+  it('keeps the invite route available for the onboarding flow', () => {
+    renderRoute('/onboard/invite-123');
 
-    renderRoute('/');
-
-    await user.type(screen.getByLabelText(/admin token/i), 'bad-token');
-    await user.click(screen.getByRole('button', { name: /load dashboard/i }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    const [, init] = fetchMock.mock.calls[0];
-    const headers = new Headers(init?.headers);
-
-    expect(headers.get('authorization')).toBe('Bearer bad-token');
-    expect(headers.get('x-admin-token')).toBe('bad-token');
-    expect(authState.clearAdminToken).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/admin token rejected/i)).toBeInTheDocument();
-  });
-});
-
-describe('upload validation', () => {
-  it('advertises the backend image-only upload contract', () => {
-    renderRoute('/upload/job_123');
-
-    const fileInput = screen.getByLabelText(/photo files/i);
-    expect(fileInput).toHaveAttribute('accept', PHOTO_UPLOAD_ACCEPT);
-    expect(screen.getByText(/png, jpg, jpeg, heic, heif, or webp images only/i)).toBeInTheDocument();
-    expect(fileInput.getAttribute('accept') ?? '').not.toContain('.pdf');
-  });
-
-  it('rejects pdf files in the validation helper', () => {
-    expect(isSupportedPhotoFile(new File(['pdf'], 'invoice.pdf', { type: 'application/pdf' }))).toBe(false);
-    expect(isSupportedPhotoFile(new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' }))).toBe(true);
+    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /begin interview/i })).toBeInTheDocument();
   });
 });
