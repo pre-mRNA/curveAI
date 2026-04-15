@@ -4,7 +4,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import App from './App';
-import { clearOnboardingSession, saveOnboardingSession } from './lib/onboardingSession';
 
 function renderRoute(initialPath: string) {
   return render(
@@ -34,7 +33,6 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
     status: 'interviewing',
     staffId: 'staff_1',
     staffName: 'Jordan',
-    participantToken: 'session-token',
     expiresAt: '2026-04-17T10:00:00.000Z',
     consentAccepted: true,
     cloneConsentAccepted: true,
@@ -121,7 +119,6 @@ describe('onboarding route', () => {
   let savedReviewPayload: Record<string, unknown> | null = null;
 
   beforeEach(() => {
-    clearOnboardingSession();
     savedReviewPayload = null;
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -130,18 +127,11 @@ describe('onboarding route', () => {
       const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
       const method = init?.method ?? 'GET';
 
-      if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
-        return jsonResponse({
-          session: backendSession({
-            status: 'pending',
-            consentAccepted: false,
-            cloneConsentAccepted: false,
-            nextQuestion: null,
-          }),
-        });
+      if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
+        return jsonResponse({ error: 'No resumable session' }, 401);
       }
 
-      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/token') && method === 'POST') {
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
         return jsonResponse({
           session: backendSession(),
         });
@@ -252,7 +242,7 @@ describe('onboarding route', () => {
 
     renderRoute('/onboard/invite-123');
 
-    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
     expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
 
     await user.click(screen.getByLabelText(/i consent to recording/i));
@@ -366,15 +356,40 @@ describe('onboarding route', () => {
     });
     vi.spyOn(Date, 'now').mockImplementation(() => now);
 
-    saveOnboardingSession({
-      inviteCode: 'invite-123',
-      sessionId: 'sess_1',
-      sessionToken: 'session-token',
-    });
-
     fetchMock.mockImplementation(async (input, init) => {
       const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
       const method = init?.method ?? 'GET';
+
+      if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
+        return jsonResponse({
+          session: backendSession({
+            status: 'voice_sample',
+            calendar: {
+              provider: 'microsoft',
+              status: 'connected',
+              accountEmail: 'jordan@example.com',
+            },
+            voiceSample: voiceSampleUploaded
+              ? {
+                  sampleLabel: 'Browser voice sample',
+                  recommendedForClone: true,
+                  qualityScore: 0.88,
+                  reasons: ['Clear browser recording'],
+                }
+              : undefined,
+            turns: [
+              {
+                id: 'turn_voice_1',
+                speaker: 'participant',
+                text: 'We handle emergency plumbing across the inner west.',
+                createdAt: '2026-04-14T10:02:00.000Z',
+              },
+            ],
+            updatedAt: '2026-04-14T10:02:00.000Z',
+          }),
+          checklist: [],
+        });
+      }
 
       if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1') && method === 'GET') {
         return jsonResponse({

@@ -8,7 +8,7 @@ export function ProtectedImage({
   alt,
 }: {
   photoId: string;
-  sessionToken: string;
+  sessionToken?: string;
   alt: string;
 }) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);

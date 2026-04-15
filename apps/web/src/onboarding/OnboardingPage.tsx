@@ -1,12 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
-import {
-  clearOnboardingSession,
-  readOnboardingSession,
-  saveOnboardingSession,
-  type StoredOnboardingSession,
-} from '../lib/onboardingSession';
 import type {
   CalendarConnectResponse,
   OnboardingConsentPayload,
@@ -150,7 +144,6 @@ export default function OnboardingPage() {
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [session, setSession] = useState<OnboardingSession | null>(null);
-  const [sessionToken, setSessionToken] = useState('');
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('consent');
   const [consent, setConsent] = useState<OnboardingConsentPayload>(createBlankConsent());
   const [startingSession, setStartingSession] = useState(false);
@@ -195,16 +188,12 @@ export default function OnboardingPage() {
     typeof navigator.mediaDevices.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined';
 
-  async function refreshSession(
-    nextSessionId = session?.id,
-    nextToken = sessionToken,
-    options?: { syncStep?: boolean },
-  ) {
-    if (!nextSessionId || !nextToken) {
+  async function refreshSession(nextSessionId = session?.id, options?: { syncStep?: boolean }) {
+    if (!nextSessionId) {
       return null;
     }
 
-    const nextSession = await apiClient.getOnboardingSession(nextSessionId, nextToken);
+    const nextSession = await apiClient.getOnboardingSession(nextSessionId);
     setSession(nextSession);
     setCurrentQuestion(nextSession.currentQuestion || '');
     if (options?.syncStep !== false) {
@@ -213,8 +202,8 @@ export default function OnboardingPage() {
     return nextSession;
   }
 
-  async function refreshReview(nextSessionId = session?.id, nextToken = sessionToken) {
-    if (!nextSessionId || !nextToken) {
+  async function refreshReview(nextSessionId = session?.id) {
+    if (!nextSessionId) {
       return null;
     }
 
@@ -222,7 +211,7 @@ export default function OnboardingPage() {
     setReviewError(null);
 
     try {
-      const nextReview = await apiClient.getOnboardingReview(nextSessionId, nextToken);
+      const nextReview = await apiClient.getOnboardingReview(nextSessionId);
       setReview(nextReview);
       setReviewDraft(draftFromReview(nextReview));
       return nextReview;
@@ -237,28 +226,49 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     let alive = true;
+    setBootstrapLoading(true);
+    setBootstrapError(null);
+    setSession(null);
+    setCurrentStep('consent');
+    setCurrentQuestion('');
+    setAnswerDraft('');
+    setAnswerError(null);
+    setReview(null);
+    setReviewDraft(createEmptyReviewDraft());
+    setReviewError(null);
+    setCalendarConnectState('idle');
+    setCalendarLink('');
+    setCalendarMessage(null);
+    setVoiceBlob(null);
+    setVoiceDurationSeconds(0);
+    setVoiceError(null);
+    setFinalizeResult(null);
 
-    async function hydrateStoredSession(storedSession: StoredOnboardingSession) {
+    async function hydrateInviteSession(nextInviteCode: string) {
       try {
-        const nextSession = await apiClient.getOnboardingSession(storedSession.sessionId, storedSession.sessionToken);
+        const nextSession = await apiClient.resumeOnboardingSession(nextInviteCode);
         if (!alive) {
           return;
         }
 
+        if (!nextSession) {
+          setSession(null);
+          setCurrentStep('consent');
+          setBootstrapError(null);
+          return;
+        }
+
         setSession(nextSession);
-        setSessionToken(storedSession.sessionToken);
         setCurrentQuestion(nextSession.currentQuestion || '');
         setCurrentStep(safeStep(nextSession.currentStep));
         setBootstrapError(null);
-        void refreshReview(storedSession.sessionId, storedSession.sessionToken);
+        void refreshReview(nextSession.id);
       } catch (error) {
         if (!alive) {
           return;
         }
 
-        clearOnboardingSession();
         setSession(null);
-        setSessionToken('');
         setCurrentStep('consent');
         setBootstrapError(error instanceof Error ? error.message : 'The secure onboarding session is no longer available.');
       } finally {
@@ -269,7 +279,6 @@ export default function OnboardingPage() {
     }
 
     if (!inviteCode) {
-      clearOnboardingSession();
       setBootstrapError('Invite code is required to start onboarding.');
       setBootstrapLoading(false);
       return () => {
@@ -277,15 +286,7 @@ export default function OnboardingPage() {
       };
     }
 
-    const stored = readOnboardingSession();
-    if (stored && stored.inviteCode === inviteCode) {
-      void hydrateStoredSession(stored);
-    } else {
-      if (stored) {
-        clearOnboardingSession();
-      }
-      setBootstrapLoading(false);
-    }
+    void hydrateInviteSession(inviteCode);
 
     return () => {
       alive = false;
@@ -318,14 +319,7 @@ export default function OnboardingPage() {
       const startResponse = await apiClient.startOnboardingSession(inviteCode, consent);
       const nextSession = startResponse.session;
 
-      saveOnboardingSession({
-        inviteCode,
-        sessionId: nextSession.id,
-        sessionToken: startResponse.sessionToken,
-      });
-
       setSession(nextSession);
-      setSessionToken(startResponse.sessionToken);
       setCurrentQuestion(nextSession.currentQuestion || '');
       setCurrentStep(nextSession.currentStep || 'interview');
       setReview(null);
@@ -333,8 +327,6 @@ export default function OnboardingPage() {
       setCalendarLink('');
       setCalendarMessage(null);
       setFinalizeResult(null);
-
-      void refreshSession(nextSession.id, startResponse.sessionToken);
     } catch (error) {
       setBootstrapError(error instanceof Error ? error.message : 'Unable to start onboarding session.');
     } finally {
@@ -345,7 +337,7 @@ export default function OnboardingPage() {
   const saveAnswer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!session || !sessionToken) {
+    if (!session) {
       setAnswerError('Start the onboarding session first.');
       return;
     }
@@ -360,13 +352,13 @@ export default function OnboardingPage() {
     setAnswerError(null);
 
     try {
-      await apiClient.submitOnboardingTurn(session.id, sessionToken, {
+      await apiClient.submitOnboardingTurn(session.id, undefined, {
         text: answer,
         transcriptFormat: 'typed',
       });
 
       setAnswerDraft('');
-      await refreshSession(session.id, sessionToken);
+      await refreshSession(session.id);
     } catch (error) {
       setAnswerError(error instanceof Error ? error.message : 'Unable to save the interview answer.');
     } finally {
@@ -375,7 +367,7 @@ export default function OnboardingPage() {
   };
 
   const probeNextQuestion = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setAnswerError('Start the onboarding session first.');
       return;
     }
@@ -384,10 +376,10 @@ export default function OnboardingPage() {
     setAnswerError(null);
 
     try {
-      const nextQuestionResponse = await apiClient.requestOnboardingNextQuestion(session.id, sessionToken);
+      const nextQuestionResponse = await apiClient.requestOnboardingNextQuestion(session.id);
       setCurrentQuestion(nextQuestionResponse.question);
       setCurrentStep('interview');
-      await refreshSession(session.id, sessionToken);
+      await refreshSession(session.id);
     } catch (error) {
       setAnswerError(error instanceof Error ? error.message : 'Unable to request the next question.');
     } finally {
@@ -396,13 +388,13 @@ export default function OnboardingPage() {
   };
 
   const openReview = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setReviewError('Start the onboarding session first.');
       return;
     }
 
     setCurrentStep('review');
-    await refreshReview(session.id, sessionToken);
+    await refreshReview(session.id);
   };
 
   const updateReviewField = (key: keyof OnboardingReviewUpdate, value: string) => {
@@ -413,7 +405,7 @@ export default function OnboardingPage() {
   };
 
   const saveReview = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setReviewError('Start the onboarding session first.');
       return;
     }
@@ -422,10 +414,10 @@ export default function OnboardingPage() {
     setReviewError(null);
 
     try {
-      const nextReview = await apiClient.saveOnboardingReview(session.id, sessionToken, reviewDraft);
+      const nextReview = await apiClient.saveOnboardingReview(session.id, undefined, reviewDraft);
       setReview(nextReview);
       setReviewDraft(draftFromReview(nextReview));
-      void refreshSession(session.id, sessionToken, { syncStep: false }).catch(() => undefined);
+      void refreshSession(session.id, { syncStep: false }).catch(() => undefined);
       setCurrentStep('calendar');
     } catch (error) {
       setReviewError(error instanceof Error ? error.message : 'Unable to save extraction review.');
@@ -435,7 +427,7 @@ export default function OnboardingPage() {
   };
 
   const connectCalendar = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setCalendarMessage('Start the onboarding session first.');
       return;
     }
@@ -444,13 +436,13 @@ export default function OnboardingPage() {
     setCalendarMessage(null);
 
     try {
-      const response = await apiClient.startMicrosoftCalendarConnect(session.id, sessionToken);
+      const response = await apiClient.startMicrosoftCalendarConnect(session.id);
       const connectUrl = uploadUrlForCalendarResponse(response);
 
       if (response.connected) {
         setCalendarConnectState('connected');
         setCalendarMessage(response.accountEmail ? `Microsoft calendar connected for ${response.accountEmail}.` : 'Microsoft calendar connected.');
-        void refreshSession(session.id, sessionToken, { syncStep: false }).catch(() => undefined);
+        void refreshSession(session.id, { syncStep: false }).catch(() => undefined);
         setCurrentStep('voice_sample');
         return;
       }
@@ -471,12 +463,12 @@ export default function OnboardingPage() {
   };
 
   const refreshCalendarStatus = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       return;
     }
 
     try {
-      const nextSession = await refreshSession(session.id, sessionToken, { syncStep: false });
+      const nextSession = await refreshSession(session.id, { syncStep: false });
       if (nextSession?.calendarConnected) {
         setCalendarConnectState('connected');
         setCurrentStep('voice_sample');
@@ -542,7 +534,7 @@ export default function OnboardingPage() {
   };
 
   const uploadVoiceSample = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setVoiceError('Start the onboarding session first.');
       return;
     }
@@ -556,7 +548,7 @@ export default function OnboardingPage() {
     setVoiceError(null);
 
     try {
-      const result = await apiClient.uploadOnboardingVoiceSample(session.id, sessionToken, {
+      const result = await apiClient.uploadOnboardingVoiceSample(session.id, undefined, {
         blob: voiceBlob,
         sampleLabel: 'Browser voice sample',
         durationSeconds: voiceDurationSeconds || 30,
@@ -567,7 +559,7 @@ export default function OnboardingPage() {
         throw new Error('The backend did not accept the voice sample.');
       }
 
-      void refreshSession(session.id, sessionToken, { syncStep: false }).catch(() => undefined);
+      void refreshSession(session.id, { syncStep: false }).catch(() => undefined);
       setCurrentStep('finalize');
     } catch (error) {
       setVoiceError(error instanceof Error ? error.message : 'Unable to upload the voice sample.');
@@ -577,7 +569,7 @@ export default function OnboardingPage() {
   };
 
   const finalizeOnboarding = async () => {
-    if (!session || !sessionToken) {
+    if (!session) {
       setVoiceError('Start the onboarding session first.');
       return;
     }
@@ -591,9 +583,8 @@ export default function OnboardingPage() {
     setVoiceError(null);
 
     try {
-      const result = await apiClient.finalizeOnboarding(session.id, sessionToken);
+      const result = await apiClient.finalizeOnboarding(session.id);
       setFinalizeResult(result);
-      clearOnboardingSession();
       setSession((current) =>
         current
           ? {
@@ -602,7 +593,6 @@ export default function OnboardingPage() {
             }
           : current,
       );
-      setSessionToken('');
       setCurrentStep('complete');
     } catch (error) {
       setVoiceError(error instanceof Error ? error.message : 'Unable to finalize onboarding.');

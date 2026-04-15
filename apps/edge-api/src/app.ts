@@ -53,6 +53,8 @@ import {
 import { constantTimeEqual, createId, createParticipantToken, isExpired, sha256Hex, signHmacSha256 } from "./crypto.js";
 
 type AppBindings = { Bindings: EdgeApiEnv };
+const STAFF_SESSION_COOKIE = "curve_staff_session";
+const ONBOARDING_SESSION_COOKIE = "curve_onboarding_session";
 
 const defaultMemoryRepo = new InMemoryOnboardingRepository();
 const defaultMemoryObjectStore = new InMemoryObjectStore();
@@ -71,7 +73,24 @@ function jsonError(c: any, status: number, message: string, details?: Record<str
   );
 }
 
-function getAccessToken(request: Request): string | undefined {
+function parseCookies(request: Request): Record<string, string> {
+  const cookieHeader = request.headers.get("cookie");
+  if (!cookieHeader) {
+    return {};
+  }
+  return Object.fromEntries(
+    cookieHeader
+      .split(";")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const separator = entry.indexOf("=");
+        return separator >= 0 ? [entry.slice(0, separator), entry.slice(separator + 1)] : [entry, ""];
+      }),
+  );
+}
+
+function getBearerToken(request: Request): string | undefined {
   const authorization = request.headers.get("authorization");
   if (authorization) {
     const [scheme, ...rest] = authorization.split(/\s+/);
@@ -79,7 +98,66 @@ function getAccessToken(request: Request): string | undefined {
       return rest.join(" ").trim();
     }
   }
-  return request.headers.get("x-admin-token") ?? request.headers.get("x-staff-session") ?? request.headers.get("x-onboarding-token") ?? undefined;
+  return undefined;
+}
+
+function getAdminAccessToken(request: Request): string | undefined {
+  return getBearerToken(request) ?? request.headers.get("x-admin-token") ?? undefined;
+}
+
+function sessionCookieNames(baseName: string): string[] {
+  return [`__Host-${baseName}`, baseName];
+}
+
+function getStaffAccessToken(request: Request): string | undefined {
+  const cookies = parseCookies(request);
+  return (
+    getBearerToken(request) ??
+    request.headers.get("x-staff-session") ??
+    sessionCookieNames(STAFF_SESSION_COOKIE).map((name) => cookies[name]).find(Boolean) ??
+    undefined
+  );
+}
+
+function getOnboardingAccessToken(request: Request): string | undefined {
+  const cookies = parseCookies(request);
+  return (
+    getBearerToken(request) ??
+    request.headers.get("x-onboarding-token") ??
+    sessionCookieNames(ONBOARDING_SESSION_COOKIE).map((name) => cookies[name]).find(Boolean) ??
+    undefined
+  );
+}
+
+function cookieNameForRequest(baseName: string, requestUrl: string): string {
+  return isLocalRequest(requestUrl) ? baseName : `__Host-${baseName}`;
+}
+
+function buildSessionCookie(name: string, value: string, maxAgeSeconds: number, requestUrl: string): string {
+  const secure = !isLocalRequest(requestUrl);
+  const sameSite = secure ? "None" : "Lax";
+  return `${cookieNameForRequest(name, requestUrl)}=${value}; Path=/; HttpOnly; ${secure ? "Secure; " : ""}SameSite=${sameSite}; Max-Age=${maxAgeSeconds}`;
+}
+
+function buildExpiredCookies(name: string, requestUrl: string): string[] {
+  const secure = !isLocalRequest(requestUrl);
+  const sameSite = secure ? "None" : "Lax";
+  return sessionCookieNames(name).map(
+    (cookieName) =>
+      `${cookieName}=; Path=/; HttpOnly; ${secure ? "Secure; " : ""}SameSite=${sameSite}; Max-Age=0`,
+  );
+}
+
+function requestOrigin(request: Request): string | undefined {
+  return request.headers.get("origin") ?? undefined;
+}
+
+function isAllowedBrowserOrigin(request: Request, allowedOrigins: string[]): boolean {
+  const origin = requestOrigin(request);
+  if (!origin) {
+    return true;
+  }
+  return allowedOrigins.includes(origin);
 }
 
 function parseValidation<TSchema extends ZodTypeAny>(schema: TSchema, input: unknown): { data?: z.output<TSchema>; issues?: Array<{ path: string; message: string }> } {
@@ -467,12 +545,41 @@ export function createApp(options?: {
   });
 
   const app = new Hono<AppBindings>();
+  const opsOrigins = [config.publicOpsAppUrl].filter(Boolean);
+  const staffOrigins = [config.publicStaffAppUrl, config.publicOpsAppUrl].filter(
+    (value): value is string => Boolean(value),
+  );
+  const onboardingOrigins = [config.publicOnboardingAppUrl, config.publicOpsAppUrl].filter(
+    (value): value is string => Boolean(value),
+  );
+  const uploadOrigins = [config.publicUploadAppUrl, config.publicOpsAppUrl].filter(
+    (value): value is string => Boolean(value),
+  );
 
   app.use("*", cors({
     origin: config.allowedOrigins.length === 1 ? config.allowedOrigins[0] : config.allowedOrigins,
     allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Staff-Session", "X-Onboarding-Token", "X-Curve-Signature", "X-Curve-Timestamp"],
     allowMethods: ["GET", "POST", "OPTIONS"],
+    credentials: true,
   }));
+
+  const requireBrowserOrigin =
+    (allowedOrigins: string[], message = "Request origin is not allowed for this route") =>
+    async (c: any, next: () => Promise<void>) => {
+      if (!isAllowedBrowserOrigin(c.req.raw, allowedOrigins)) {
+        return jsonError(c, 403, message);
+      }
+      await next();
+    };
+
+  app.use("/dashboard", requireBrowserOrigin(opsOrigins));
+  app.use("/ai-test-studio/*", requireBrowserOrigin(opsOrigins));
+  app.use("/staff/*", requireBrowserOrigin(staffOrigins));
+  app.use("/jobs", requireBrowserOrigin(staffOrigins));
+  app.use("/jobs/*", requireBrowserOrigin(staffOrigins));
+  app.use("/assets/*", requireBrowserOrigin(staffOrigins));
+  app.use("/onboarding/*", requireBrowserOrigin(onboardingOrigins));
+  app.use("/uploads/*", requireBrowserOrigin(uploadOrigins));
 
   app.use("*", async (c, next) => {
     if (c.req.method === "OPTIONS") {
@@ -513,12 +620,12 @@ export function createApp(options?: {
   });
 
   function hasAdminAccess(request: Request): boolean {
-    const token = getAccessToken(request);
+    const token = getAdminAccessToken(request);
     return Boolean(token && config.adminToken && constantTimeEqual(token, config.adminToken));
   }
 
   async function requireAdmin(c: any) {
-    const token = getAccessToken(c.req.raw);
+    const token = getAdminAccessToken(c.req.raw);
     if (!token || !config.adminToken || !constantTimeEqual(token, config.adminToken)) {
       return jsonError(c, 401, "Admin authentication is required");
     }
@@ -526,12 +633,13 @@ export function createApp(options?: {
   }
 
   async function authenticateActor(c: any): Promise<AuthActor | undefined> {
-    const token = getAccessToken(c.req.raw);
+    const adminToken = getAdminAccessToken(c.req.raw);
+    if (adminToken && config.adminToken && constantTimeEqual(adminToken, config.adminToken)) {
+      return { kind: "admin" };
+    }
+    const token = getStaffAccessToken(c.req.raw);
     if (!token) {
       return undefined;
-    }
-    if (config.adminToken && constantTimeEqual(token, config.adminToken)) {
-      return { kind: "admin" };
     }
 
     const tokenHash = await sha256Hex(token);
@@ -562,7 +670,7 @@ export function createApp(options?: {
 
   async function requireOnboardingSession(c: any): Promise<OnboardingSessionResult> {
     const sessionId = c.req.param("id");
-    const token = getAccessToken(c.req.raw);
+    const token = getOnboardingAccessToken(c.req.raw);
     if (!sessionId) {
       return { error: jsonError(c, 400, "sessionId is required") };
     }
@@ -935,15 +1043,20 @@ export function createApp(options?: {
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
     });
+    const expiresAt = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
     const verifiedStaff = await repo.getStaff(staff.id);
-    return c.json({
+    const response = c.json({
       ok: true,
       staff: sanitizeStaff(verifiedStaff ?? staff),
       session: {
-        token: sessionToken,
-        expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+        expiresAt,
       },
     });
+    response.headers.append(
+      "set-cookie",
+      buildSessionCookie(STAFF_SESSION_COOKIE, sessionToken, 72 * 60 * 60, c.req.url),
+    );
+    return response;
   });
 
   app.get("/staff/me", async (c) => {
@@ -962,6 +1075,21 @@ export function createApp(options?: {
       ok: true,
       staff: sanitizeStaff(staff),
     });
+  });
+
+  app.post("/staff/sign-out", async (c) => {
+    const token = getStaffAccessToken(c.req.raw);
+    if (token) {
+      await repo.deleteStaffSession(await sha256Hex(token));
+    }
+    const response = c.json({
+      ok: true,
+      signedOut: true,
+    });
+    for (const cookie of buildExpiredCookies(STAFF_SESSION_COOKIE, c.req.url)) {
+      response.headers.append("set-cookie", cookie);
+    }
+    return response;
   });
 
   app.post("/staff/voice-consent", async (c) => {
@@ -1082,13 +1210,53 @@ export function createApp(options?: {
     if (!session) {
       return jsonError(c, 404, "Onboarding invite not found or expired");
     }
-    return c.json(
+    const authenticatedSession = await onboardingService.authenticateSession(session.summary.id, session.participantToken);
+    if (!authenticatedSession) {
+      return jsonError(c, 500, "Onboarding session could not be initialized");
+    }
+    const response = c.json(
       {
         ok: true,
-        session: session.summary,
+        session: await onboardingService.provisionRealtimeVoice(authenticatedSession, {
+          consentAccepted: parsed.data.consentAccepted,
+          cloneConsentAccepted: parsed.data.cloneConsentAccepted,
+        }),
       },
       { status: 201 },
     );
+    const maxAgeSeconds = Math.max(
+      0,
+      Math.floor((new Date(authenticatedSession.expiresAt).getTime() - Date.now()) / 1000),
+    );
+    response.headers.append(
+      "set-cookie",
+      buildSessionCookie(ONBOARDING_SESSION_COOKIE, session.participantToken, maxAgeSeconds, c.req.url),
+    );
+    return response;
+  });
+
+  app.get("/onboarding/invites/:inviteCode/session", async (c) => {
+    const inviteCode = c.req.param("inviteCode");
+    if (!inviteCode) {
+      return jsonError(c, 400, "inviteCode is required");
+    }
+    const token = getOnboardingAccessToken(c.req.raw);
+    if (!token) {
+      return jsonError(c, 401, "Onboarding session authentication is required");
+    }
+    const invite = await repo.getInviteByCode(inviteCode);
+    if (!invite?.sessionId) {
+      return jsonError(c, 404, "Onboarding session not found");
+    }
+    const session = await onboardingService.authenticateSession(invite.sessionId, token);
+    if (!session) {
+      return jsonError(c, 403, "Onboarding session token is invalid");
+    }
+    return c.json({
+      ok: true,
+      session: await onboardingService.getSessionSummary(session),
+      checklist: onboardingService.getChecklist(),
+    });
   });
 
   app.get("/onboarding/sessions/:id", async (c) => {
@@ -1115,10 +1283,23 @@ export function createApp(options?: {
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
     }
-    return c.json({
+    const token = getOnboardingAccessToken(c.req.raw);
+    if (!token) {
+      return jsonError(c, 401, "Onboarding session authentication is required");
+    }
+    const response = c.json({
       ok: true,
       session: await onboardingService.provisionRealtimeVoice(session, parsed.data),
     });
+    const maxAgeSeconds = Math.max(
+      0,
+      Math.floor((new Date(session.expiresAt).getTime() - Date.now()) / 1000),
+    );
+    response.headers.append(
+      "set-cookie",
+      buildSessionCookie(ONBOARDING_SESSION_COOKIE, token, maxAgeSeconds, c.req.url),
+    );
+    return response;
   });
 
   app.post("/onboarding/sessions/:id/turns", async (c) => {
@@ -1260,11 +1441,15 @@ export function createApp(options?: {
       return result.error;
     }
     const finalized = await onboardingService.finalize(result.session);
-    return c.json({
+    const response = c.json({
       ok: true,
       session: finalized.session,
       staff: finalized.staff,
     });
+    for (const cookie of buildExpiredCookies(ONBOARDING_SESSION_COOKIE, c.req.url)) {
+      response.headers.append("set-cookie", cookie);
+    }
+    return response;
   });
 
   const handleUploadPhotos = async (c: any) => {

@@ -989,6 +989,13 @@ export class D1OnboardingRepository implements OnboardingRepository {
       : undefined;
   }
 
+  async deleteStaffSession(tokenHash: string): Promise<void> {
+    await this.db
+      .prepare(`DELETE FROM staff_sessions WHERE token_hash = ?`)
+      .bind(tokenHash)
+      .run();
+  }
+
   async saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord> {
     await this.db
       .prepare(

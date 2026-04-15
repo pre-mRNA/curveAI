@@ -24,6 +24,7 @@ function createHeaders(initHeaders?: HeadersInit, sessionToken?: string): Header
 async function requestJson<T>(path: string, init?: RequestInit, sessionToken?: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: 'include',
     headers: createHeaders(init?.headers, sessionToken),
   });
 
@@ -48,8 +49,9 @@ async function requestJson<T>(path: string, init?: RequestInit, sessionToken?: s
   return (responseText ? JSON.parse(responseText) : null) as T;
 }
 
-export async function fetchProtectedAsset(photoId: string, sessionToken: string): Promise<Blob> {
+export async function fetchProtectedAsset(photoId: string, sessionToken?: string): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}/assets/photos/${encodeURIComponent(photoId)}`, {
+    credentials: 'include',
     headers: createHeaders(undefined, sessionToken),
   });
 
@@ -67,7 +69,7 @@ export async function verifyStaffOtp(input: {
 }): Promise<{ staff: StaffProfile; session: StaffSession }> {
   const payload = await requestJson<{
     staff: StaffProfile;
-    session: { token: string; expiresAt: string };
+    session: { expiresAt: string };
   }>('/staff/verify-otp', {
     method: 'POST',
     headers: {
@@ -79,29 +81,28 @@ export async function verifyStaffOtp(input: {
   return {
     staff: payload.staff,
     session: {
-      token: payload.session.token,
       expiresAt: payload.session.expiresAt,
       staffId: payload.staff.id,
     },
   };
 }
 
-export async function getStaffProfile(sessionToken: string): Promise<StaffProfile> {
+export async function getStaffProfile(sessionToken?: string): Promise<StaffProfile> {
   const payload = await requestJson<{ staff: StaffProfile }>('/staff/me', undefined, sessionToken);
   return payload.staff;
 }
 
-export async function getStaffJobs(sessionToken: string): Promise<JobSummary[]> {
+export async function getStaffJobs(sessionToken?: string): Promise<JobSummary[]> {
   const payload = await requestJson<{ jobs: JobSummary[] }>('/jobs', undefined, sessionToken);
   return payload.jobs;
 }
 
-export async function getJobCard(sessionToken: string, jobId: string): Promise<JobCard> {
+export async function getJobCard(sessionToken: string | undefined, jobId: string): Promise<JobCard> {
   const payload = await requestJson<{ card: JobCard }>(`/jobs/${encodeURIComponent(jobId)}/card`, undefined, sessionToken);
   return payload.card;
 }
 
-export async function saveVoiceConsent(sessionToken: string, input: {
+export async function saveVoiceConsent(sessionToken: string | undefined, input: {
   staffId: string;
   consent: boolean;
   signedBy?: string;
@@ -121,7 +122,7 @@ export async function saveVoiceConsent(sessionToken: string, input: {
 }
 
 export async function savePricingInterview(
-  sessionToken: string,
+  sessionToken: string | undefined,
   input: {
     staffId: string;
     responses: PricingProfile;
@@ -139,7 +140,7 @@ export async function savePricingInterview(
 }
 
 export async function connectCalendar(
-  sessionToken: string,
+  sessionToken: string | undefined,
   input: {
     staffId: string;
     accountEmail?: string;
@@ -160,4 +161,10 @@ export async function connectCalendar(
   }, sessionToken);
 
   return payload.staff;
+}
+
+export async function signOutStaff(): Promise<void> {
+  await requestJson<{ ok: true }>('/staff/sign-out', {
+    method: 'POST',
+  });
 }

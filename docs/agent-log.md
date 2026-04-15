@@ -81,3 +81,6 @@
 - Moved the Worker deploy path to an env-driven renderer so `CLOUDFLARE_D1_DATABASE_ID` can supply the real D1 binding at deploy time without editing checked-in config.
 - Stopped persisting raw upload tokens in new D1 writes by hashing the token before storage lookups/inserts and redacting the stored upload-link field while keeping the public flow unchanged.
 - Corrected the onboarding/staff UI after the move to memory-only session tokens so the product no longer promises durable browser resume semantics it does not actually provide.
+- Switched onboarding and staff browser auth to Worker-issued `HttpOnly` cookies instead of browser-visible reusable session tokens, collapsed onboarding start into a single consent + cookie issuance flow, and removed raw staff session tokens from the Worker JSON responses.
+- Made `/staff/sign-out` revoke the server-side staff session, added route-family origin fencing so public onboarding/upload Pages origins cannot read staff or ops data with ambient cookies, and covered that boundary with a new Worker test.
+- Rechecked the updated onboarding and staff mobile shells with fresh screenshots at [curve-onboarding-cookie-mobile.png](/tmp/curve-onboarding-cookie-mobile.png) and [curve-staff-cookie-mobile.png](/tmp/curve-staff-cookie-mobile.png).

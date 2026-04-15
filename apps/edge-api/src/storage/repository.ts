@@ -135,6 +135,7 @@ export interface OnboardingRepository {
   saveStaffAuthState(input: StaffAuthStateInput): Promise<StaffRecord | undefined>;
   createStaffSession(input: StaffSessionInput): Promise<void>;
   getStaffSession(tokenHash: string): Promise<StaffSessionRecord | undefined>;
+  deleteStaffSession(tokenHash: string): Promise<void>;
   saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord>;
   listJobs(staffId?: string): Promise<JobRecord[]>;
   getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;

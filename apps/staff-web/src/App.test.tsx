@@ -15,20 +15,39 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 
 describe('staff web app', () => {
   beforeEach(() => {
-    window.sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
-  it('renders the staff auth screen by default', () => {
+  it('renders the staff auth screen by default', async () => {
+    let resolveProfileRequest: (response: Response) => void = () => {
+      throw new Error('The staff profile request was not captured.');
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/staff/me')) {
+        return await new Promise<Response>((resolve) => {
+          resolveProfileRequest = resolve;
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: /verify the staff session/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /checking for an active secure staff session/i })).toBeInTheDocument();
+    resolveProfileRequest(jsonResponse({ error: { message: 'Authentication is required' } }, { status: 401 }));
+    expect(await screen.findByRole('heading', { name: /verify the staff session/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open staff console/i })).toBeInTheDocument();
   });
 
-  it('verifies the OTP, stores the session, and loads the queue', async () => {
+  it('verifies the OTP and loads the queue with the worker-backed browser session', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
+
+      if (url.endsWith('/staff/me')) {
+        return jsonResponse({ error: { message: 'Authentication is required' } }, { status: 401 });
+      }
 
       if (url.endsWith('/staff/verify-otp')) {
         expect(init?.method).toBe('POST');
@@ -97,6 +116,8 @@ describe('staff web app', () => {
 
     const user = userEvent.setup();
     render(<App />);
+
+    await screen.findByRole('heading', { name: /verify the staff session/i });
 
     await user.type(screen.getByLabelText(/invite token/i), 'invite-token');
     await user.type(screen.getByLabelText(/^otp$/i), '123456');

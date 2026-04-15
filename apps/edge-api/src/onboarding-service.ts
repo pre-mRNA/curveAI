@@ -153,7 +153,7 @@ export class OnboardingService {
 
   async getSessionSummary(session: OnboardingSessionRecord, participantToken?: string) {
     const turns = await this.options.repo.listTurns(session.id);
-    return this.toSessionSummary(session, turns, participantToken ?? "");
+    return this.toSessionSummary(session, turns, participantToken);
   }
 
   private ensureMutable(session: OnboardingSessionRecord, action: string) {
@@ -420,7 +420,7 @@ export class OnboardingService {
   private toSessionSummary(
     session: OnboardingSessionRecord,
     turns: InterviewTurn[],
-    participantToken: string,
+    participantToken?: string,
   ): OnboardingSessionSummary {
     return {
       id: session.id,

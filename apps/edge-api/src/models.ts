@@ -160,7 +160,7 @@ export interface OnboardingSessionSummary {
   status: OnboardingSessionStatus;
   staffId: string;
   staffName: string;
-  participantToken: string;
+  participantToken?: string;
   expiresAt: string;
   consentAccepted: boolean;
   cloneConsentAccepted: boolean;

@@ -135,7 +135,7 @@ export const onboardingSessionSummarySchema = z.object({
   status: onboardingSessionStatusSchema,
   staffId: z.string(),
   staffName: z.string(),
-  participantToken: z.string(),
+  participantToken: z.string().optional(),
   expiresAt: z.string(),
   consentAccepted: z.boolean(),
   cloneConsentAccepted: z.boolean(),

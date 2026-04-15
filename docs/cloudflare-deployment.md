@@ -53,6 +53,7 @@ Keep `.wrangler/` state and `.dev.vars*` files local-only and gitignored. Minifl
 
 The Pages apps no longer rely on `/api` same-origin behavior in production.
 Their build scripts will warn locally when `VITE_API_BASE_URL` is missing and should fail in Pages or strict builds.
+Browser auth for onboarding and staff now relies on Worker-issued `HttpOnly` session cookies instead of browser-stored reusable bearer tokens.
 
 Use this env var for migration and deploy scripts:
 
@@ -78,10 +79,16 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - Staging should be internal-only behind Cloudflare Access.
 - Use dedicated Pages projects for onboarding, ops, and uploads, plus a separate Worker route for the API.
 - Keep provider callbacks and signed upload endpoints reachable through the API origin, but still state-bound and token-checked.
-- Keep the three public app URLs and the API URL explicit so the browser never depends on same-origin assumptions.
+- Keep the three public app URLs and the API URL explicit.
+- For reliable browser sessions, prefer same-site custom domains such as `ops.<your-domain>`, `staff.<your-domain>`, `onboard.<your-domain>`, `upload.<your-domain>`, and `api.<your-domain>` rather than mixing `pages.dev` and `workers.dev` review hosts. Cross-site hostnames can trigger third-party cookie blocking in some browsers.
 - If Access is not configured yet, set `REVIEW_PASSCODE` and `REVIEW_COOKIE_SECRET` on each Pages project to enable the fallback review gate.
 - That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
 - The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
+- Worker route families are now origin-fenced by app surface:
+  - `/dashboard` and `/ai-test-studio/*` only accept the ops origin
+  - `/staff/*`, `/jobs*`, and `/assets/*` only accept the staff or ops origin
+  - `/onboarding/*` only accept the onboarding or ops origin
+  - `/uploads/*` only accept the upload or ops origin
 
 ## Local Development
 

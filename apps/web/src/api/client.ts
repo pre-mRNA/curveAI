@@ -58,15 +58,29 @@ function createHeaders(initHeaders?: HeadersInit, auth?: AuthOptions): Headers {
 async function requestJson<T>(path: string, init?: RequestInit, auth?: AuthOptions): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: 'include',
     headers: createHeaders(init?.headers, auth),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new ApiError(response.status, errorText || `Request failed: ${response.status}`);
+  const responseText = await response.text().catch(() => '');
+  let parsedError: unknown = undefined;
+  if (responseText) {
+    try {
+      parsedError = JSON.parse(responseText);
+    } catch {
+      parsedError = undefined;
+    }
   }
 
-  return (await response.json()) as T;
+  if (!response.ok) {
+    const message =
+      typeof parsedError === 'object' && parsedError !== null && 'error' in parsedError
+        ? (parsedError as { error?: { message?: string } }).error?.message
+        : undefined;
+    throw new ApiError(response.status, message || responseText || `Request failed: ${response.status}`);
+  }
+
+  return (responseText ? JSON.parse(responseText) : null) as T;
 }
 
 function mapStatus(status: BackendSessionStatus, session: BackendSessionSummary): OnboardingSession['status'] {
@@ -208,34 +222,31 @@ export const apiClient = {
       },
       body: JSON.stringify({
         inviteCode,
+        consentAccepted: consent.recordingConsent && consent.dataProcessingConsent,
+        cloneConsentAccepted: consent.voiceCloneConsent,
       }),
     });
 
-    const token = started.session.participantToken;
-    const tokenResponse = await requestJson<BackendSessionEnvelope>(
-      `/onboarding/sessions/${encodeURIComponent(started.session.id)}/token`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          consentAccepted: consent.recordingConsent && consent.dataProcessingConsent,
-          cloneConsentAccepted: consent.voiceCloneConsent,
-        }),
-      },
-      {
-        bearerToken: token,
-      },
-    );
-
     return {
-      session: mapSession(tokenResponse.session),
-      sessionToken: token,
+      session: mapSession(started.session),
     };
   },
 
-  async getOnboardingSession(sessionId: string, sessionToken: string): Promise<OnboardingSession> {
+  async resumeOnboardingSession(inviteCode: string): Promise<OnboardingSession | null> {
+    try {
+      const response = await requestJson<BackendSessionEnvelope>(
+        `/onboarding/invites/${encodeURIComponent(inviteCode)}/session`,
+      );
+      return mapSession(response.session);
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
+  async getOnboardingSession(sessionId: string, sessionToken?: string): Promise<OnboardingSession> {
     const response = await requestJson<BackendSessionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}`,
       undefined,
@@ -250,11 +261,7 @@ export const apiClient = {
     throw new Error('The onboarding session token is issued during session start.');
   },
 
-  async submitOnboardingTurn(
-    sessionId: string,
-    sessionToken: string,
-    turn: OnboardingTurnPayload,
-  ): Promise<OnboardingSession> {
+  async submitOnboardingTurn(sessionId: string, sessionToken: string | undefined, turn: OnboardingTurnPayload): Promise<OnboardingSession> {
     const response = await requestJson<BackendSessionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/turns`,
       {
@@ -274,10 +281,7 @@ export const apiClient = {
     return mapSession(response.session);
   },
 
-  async requestOnboardingNextQuestion(
-    sessionId: string,
-    sessionToken: string,
-  ): Promise<OnboardingNextQuestionResponse> {
+  async requestOnboardingNextQuestion(sessionId: string, sessionToken?: string): Promise<OnboardingNextQuestionResponse> {
     const response = await requestJson<BackendNextQuestionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/next-question`,
       {
@@ -293,7 +297,7 @@ export const apiClient = {
     };
   },
 
-  async getOnboardingReview(sessionId: string, sessionToken: string): Promise<OnboardingReview> {
+  async getOnboardingReview(sessionId: string, sessionToken?: string): Promise<OnboardingReview> {
     const response = await requestJson<BackendReviewEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/review`,
       undefined,
@@ -306,7 +310,7 @@ export const apiClient = {
 
   async saveOnboardingReview(
     sessionId: string,
-    sessionToken: string,
+    sessionToken: string | undefined,
     review: OnboardingReviewUpdate,
   ): Promise<OnboardingReview> {
     const response = await requestJson<BackendSessionEnvelope>(`/onboarding/sessions/${encodeURIComponent(sessionId)}/review`, {
@@ -350,7 +354,7 @@ export const apiClient = {
 
   async startMicrosoftCalendarConnect(
     sessionId: string,
-    sessionToken: string,
+    sessionToken?: string,
   ): Promise<CalendarConnectResponse> {
     const response = await requestJson<BackendCalendarStartResponse>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/calendar/microsoft/start`,
@@ -369,7 +373,7 @@ export const apiClient = {
 
   async uploadOnboardingVoiceSample(
     sessionId: string,
-    sessionToken: string,
+    sessionToken: string | undefined,
     sample: {
       blob?: Blob;
       sampleLabel: string;
@@ -405,7 +409,7 @@ export const apiClient = {
     };
   },
 
-  async finalizeOnboarding(sessionId: string, sessionToken: string): Promise<OnboardingFinalizeResponse> {
+  async finalizeOnboarding(sessionId: string, sessionToken?: string): Promise<OnboardingFinalizeResponse> {
     const response = await requestJson<{ session: BackendSessionSummary; staff?: { id?: string } }>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/finalize`,
       {

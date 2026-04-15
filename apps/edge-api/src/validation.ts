@@ -13,6 +13,8 @@ export const onboardingInviteInputSchema = z
 export const onboardingStartInputSchema = z
   .object({
     inviteCode: z.string().min(12),
+    consentAccepted: z.boolean(),
+    cloneConsentAccepted: z.boolean().default(false),
   })
   .strict();
 

@@ -47,7 +47,6 @@ export interface OnboardingSession {
 
 export interface OnboardingSessionStartResponse {
   session: OnboardingSession;
-  sessionToken: string;
 }
 
 export interface OnboardingSessionTokenResponse {

@@ -40,7 +40,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `/voice/*` automation routes require an HMAC signature using `AUTOMATION_SHARED_SECRET` over `timestamp.method.path.rawBody`.
 - Browser onboarding uses an invite code to mint a session-specific onboarding token, then requires explicit recording and clone consent before issuing a realtime voice session.
 - Browser onboarding cannot finalize until calendar connect and a real audio voice sample are both present.
-- Staff Pages auth now runs through the Cloudflare Worker using invite + OTP, then mints a short-lived staff session token for browser queue/setup access.
+- Staff Pages auth now runs through the Cloudflare Worker using invite + OTP, then issues an `HttpOnly` browser session cookie for queue/setup access instead of exposing reusable staff bearer tokens to the browser.
 - Customer photo uploads use opaque upload tokens, live on the dedicated upload Pages app, hash those tokens before they hit D1, store artifacts in R2 through the Worker, and expose photos back to ops through authenticated Worker asset routes instead of bearer URLs.
 
 ## Onboarding

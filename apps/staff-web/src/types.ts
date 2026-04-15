@@ -2,7 +2,6 @@ export type StaffVoiceConsentStatus = 'pending' | 'granted' | 'revoked';
 export type JobStatus = 'new' | 'quoted' | 'booked' | 'needs_follow_up' | 'completed';
 
 export interface StaffSession {
-  token: string;
   expiresAt: string;
   staffId: string;
 }

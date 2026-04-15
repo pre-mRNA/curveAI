@@ -19,13 +19,6 @@ import { AiTestStudioService } from "../src/ai-test-studio-service.js";
 import { InMemoryOnboardingRepository } from "../src/storage/memory.js";
 import { InMemoryObjectStore } from "../src/storage/artifacts.js";
 
-function authHeaders(token: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${token}`,
-    "X-Onboarding-Token": token,
-  };
-}
-
 function adminHeaders(): HeadersInit {
   return {
     Authorization: "Bearer admin-secret",
@@ -91,14 +84,15 @@ async function createStaffSession(app: ReturnType<typeof createApp>, input: {
     }),
   });
   assert.equal(verifyResponse.status, 200);
+  const sessionCookie = verifyResponse.headers.get("set-cookie");
   const verifyBody = (await verifyResponse.json()) as {
     staff: { id: string };
-    session: { token: string };
+    session: { expiresAt: string };
   };
 
   return {
     staffId: verifyBody.staff.id,
-    sessionToken: verifyBody.session.token,
+    sessionCookie: sessionCookie ?? "",
   };
 }
 
@@ -149,15 +143,18 @@ test("worker onboarding flow reaches finalized state", async () => {
     },
     body: JSON.stringify({
       inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
     }),
   });
   assert.equal(startResponse.status, 201);
+  const onboardingCookie = startResponse.headers.get("set-cookie");
+  assert.match(onboardingCookie ?? "", /curve_onboarding_session=/);
   const startBody = (await startResponse.json()) as {
-    session: { id: string; participantToken: string };
+    session: { id: string };
   };
   const sessionId = startBody.session.id;
-  const participantToken = startBody.session.participantToken;
-  assert.ok(participantToken.length >= 16);
+  assert.equal("participantToken" in startBody.session, false);
 
   const duplicateStartResponse = await app.request("/onboarding/sessions/start", {
     method: "POST",
@@ -166,27 +163,23 @@ test("worker onboarding flow reaches finalized state", async () => {
     },
     body: JSON.stringify({
       inviteCode: inviteBody.invite.code,
-    }),
-  });
-  assert.equal(duplicateStartResponse.status, 409);
-
-  const realtimeResponse = await app.request(`/onboarding/sessions/${sessionId}/token`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(participantToken),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
       consentAccepted: true,
       cloneConsentAccepted: true,
     }),
   });
-  assert.equal(realtimeResponse.status, 200);
+  assert.equal(duplicateStartResponse.status, 409);
+
+  const resumedResponse = await app.request(`/onboarding/invites/${inviteBody.invite.code}/session`, {
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
+  });
+  assert.equal(resumedResponse.status, 200);
 
   const turnResponse = await app.request(`/onboarding/sessions/${sessionId}/turns`, {
     method: "POST",
     headers: {
-      ...authHeaders(participantToken),
+      Cookie: onboardingCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -199,7 +192,7 @@ test("worker onboarding flow reaches finalized state", async () => {
   const reviewSaveResponse = await app.request(`/onboarding/sessions/${sessionId}/review`, {
     method: "POST",
     headers: {
-      ...authHeaders(participantToken),
+      Cookie: onboardingCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -216,7 +209,9 @@ test("worker onboarding flow reaches finalized state", async () => {
 
   const calendarResponse = await app.request(`/onboarding/sessions/${sessionId}/calendar/microsoft/start`, {
     method: "GET",
-    headers: authHeaders(participantToken),
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
   });
   assert.equal(calendarResponse.status, 200);
   const calendarBody = (await calendarResponse.json()) as {
@@ -238,16 +233,21 @@ test("worker onboarding flow reaches finalized state", async () => {
   formData.set("sample", new File(["voice-data"], "voice-sample.webm", { type: "audio/webm" }));
   const voiceSampleResponse = await app.request(`/onboarding/sessions/${sessionId}/voice-sample`, {
     method: "POST",
-    headers: authHeaders(participantToken),
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
     body: formData,
   });
   assert.equal(voiceSampleResponse.status, 200);
 
   const finalizeResponse = await app.request(`/onboarding/sessions/${sessionId}/finalize`, {
     method: "POST",
-    headers: authHeaders(participantToken),
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
   });
   assert.equal(finalizeResponse.status, 200);
+  assert.match(finalizeResponse.headers.get("set-cookie") ?? "", /Max-Age=0/);
   const finalizeBody = (await finalizeResponse.json()) as {
     session: { status: string };
     staff: { id: string };
@@ -256,14 +256,16 @@ test("worker onboarding flow reaches finalized state", async () => {
   assert.ok(finalizeBody.staff.id);
 
   const staleSessionRead = await app.request(`/onboarding/sessions/${sessionId}`, {
-    headers: authHeaders(participantToken),
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
   });
   assert.equal(staleSessionRead.status, 403);
 
   const blockedMutation = await app.request(`/onboarding/sessions/${sessionId}/review`, {
     method: "POST",
     headers: {
-      ...authHeaders(participantToken),
+      Cookie: onboardingCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -274,7 +276,9 @@ test("worker onboarding flow reaches finalized state", async () => {
 
   const duplicateFinalize = await app.request(`/onboarding/sessions/${sessionId}/finalize`, {
     method: "POST",
-    headers: authHeaders(participantToken),
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
   });
   assert.equal(duplicateFinalize.status, 403);
 });
@@ -390,22 +394,11 @@ test("worker blocks realtime session issuance without both consents", async () =
     },
     body: JSON.stringify({
       inviteCode: inviteBody.invite.code,
-    }),
-  });
-  const startBody = (await startResponse.json()) as { session: { id: string; participantToken: string } };
-
-  const denied = await app.request(`/onboarding/sessions/${startBody.session.id}/token`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(startBody.session.participantToken),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
       consentAccepted: true,
       cloneConsentAccepted: false,
     }),
   });
-  assert.equal(denied.status, 400);
+  assert.equal(startResponse.status, 400);
 });
 
 test("worker fails fast when Cloudflare bindings are missing", () => {
@@ -570,7 +563,7 @@ test("protected photo assets only load for the assigned staff session or admin",
 
   const jobsResponse = await app.request("/jobs", {
     headers: {
-      Authorization: `Bearer ${owner.sessionToken}`,
+      Cookie: owner.sessionCookie,
     },
   });
   assert.equal(jobsResponse.status, 200);
@@ -582,7 +575,7 @@ test("protected photo assets only load for the assigned staff session or admin",
 
   const cardResponse = await app.request(`/jobs/${jobId}/card`, {
     headers: {
-      Authorization: `Bearer ${owner.sessionToken}`,
+      Cookie: owner.sessionCookie,
     },
   });
   assert.equal(cardResponse.status, 200);
@@ -594,14 +587,14 @@ test("protected photo assets only load for the assigned staff session or admin",
 
   const ownerPhotoResponse = await app.request(`/assets/photos/${photoId}`, {
     headers: {
-      Authorization: `Bearer ${owner.sessionToken}`,
+      Cookie: owner.sessionCookie,
     },
   });
   assert.equal(ownerPhotoResponse.status, 200);
 
   const otherPhotoResponse = await app.request(`/assets/photos/${photoId}`, {
     headers: {
-      Authorization: `Bearer ${other.sessionToken}`,
+      Cookie: other.sessionCookie,
     },
   });
   assert.equal(otherPhotoResponse.status, 403);
@@ -832,16 +825,19 @@ test("staff invite verification and staff-scoped job access work on the Worker",
     }),
   });
   assert.equal(verifyResponse.status, 200);
+  const staffCookie = verifyResponse.headers.get("set-cookie");
+  assert.match(staffCookie ?? "", /curve_staff_session=/);
   const verifyBody = (await verifyResponse.json()) as {
     staff: { id: string; otpVerifiedAt?: string };
-    session: { token: string };
+    session: { expiresAt: string };
   };
   assert.equal(verifyBody.staff.id, inviteBody.staff.id);
   assert.ok(verifyBody.staff.otpVerifiedAt);
+  assert.equal("token" in verifyBody.session, false);
 
   const meResponse = await app.request("/staff/me", {
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
     },
   });
   assert.equal(meResponse.status, 200);
@@ -854,7 +850,7 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   const calendarResponse = await app.request("/staff/calendar/connect", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -870,7 +866,7 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   const consentResponse = await app.request("/staff/voice-consent", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -885,7 +881,7 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   const pricingResponse = await app.request("/staff/pricing-interview", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -925,7 +921,7 @@ test("staff invite verification and staff-scoped job access work on the Worker",
 
   const jobsResponse = await app.request("/jobs", {
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
     },
   });
   assert.equal(jobsResponse.status, 200);
@@ -937,17 +933,33 @@ test("staff invite verification and staff-scoped job access work on the Worker",
 
   const jobCardResponse = await app.request(`/jobs/${contextBody.job.id}/card`, {
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
     },
   });
   assert.equal(jobCardResponse.status, 200);
 
   const forbiddenJobsResponse = await app.request(`/jobs?staffId=staff_other`, {
     headers: {
-      Authorization: `Bearer ${verifyBody.session.token}`,
+      Cookie: staffCookie ?? "",
     },
   });
   assert.equal(forbiddenJobsResponse.status, 403);
+
+  const signOutResponse = await app.request("/staff/sign-out", {
+    method: "POST",
+    headers: {
+      Cookie: staffCookie ?? "",
+    },
+  });
+  assert.equal(signOutResponse.status, 200);
+  assert.match(signOutResponse.headers.get("set-cookie") ?? "", /Max-Age=0/);
+
+  const revokedMeResponse = await app.request("/staff/me", {
+    headers: {
+      Cookie: staffCookie ?? "",
+    },
+  });
+  assert.equal(revokedMeResponse.status, 401);
 });
 
 test("staff OTP verification rejects non-numeric codes", async () => {
@@ -965,6 +977,26 @@ test("staff OTP verification rejects non-numeric codes", async () => {
   });
 
   assert.equal(response.status, 400);
+});
+
+test("staff session routes reject requests from the public onboarding origin", async () => {
+  const app = createTestApp();
+  const staff = await createStaffSession(app, {
+    fullName: "Jordan Tradie",
+    email: "jordan@example.com",
+    phoneNumber: "+61422222222",
+    role: "Owner",
+    timezone: "Australia/Sydney",
+  });
+
+  const response = await app.request("/staff/me", {
+    headers: {
+      Cookie: staff.sessionCookie,
+      Origin: "https://curve-ai-onboarding.pages.dev",
+    },
+  });
+
+  assert.equal(response.status, 403);
 });
 
 test("hosted reasoning payload strips onboarding secrets before egress", async () => {

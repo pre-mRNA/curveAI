@@ -321,6 +321,10 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     return session ? clone(session) : undefined;
   }
 
+  async deleteStaffSession(tokenHash: string): Promise<void> {
+    this.staffSessions.delete(tokenHash);
+  }
+
   async saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord> {
     const existing = this.staffRecords.get(input.staffId);
     if (!existing) {

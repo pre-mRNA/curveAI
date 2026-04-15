@@ -6,11 +6,11 @@ import {
   getStaffJobs,
   getStaffProfile,
   savePricingInterview,
+  signOutStaff,
   saveVoiceConsent,
   verifyStaffOtp,
 } from './api/client';
 import { ProtectedImage } from './ProtectedImage';
-import { clearStaffSession, readStaffSession, saveStaffSession, updateStoredStaffProfile } from './lib/staffSession';
 import { testScenarios } from './testStudio';
 import type { JobCard, JobSummary, PricingProfile, StaffProfile } from './types';
 
@@ -100,11 +100,9 @@ function createCalendarDraft(staff?: StaffProfile | null) {
 
 function AppShell({
   staff,
-  sessionToken,
   onSignOut,
 }: {
   staff: StaffProfile;
-  sessionToken: string;
   onSignOut: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('queue');
@@ -138,9 +136,8 @@ function AppShell({
 
   async function reloadProfile() {
     try {
-      const nextProfile = await getStaffProfile(sessionToken);
+      const nextProfile = await getStaffProfile();
       setProfile(nextProfile);
-      updateStoredStaffProfile(nextProfile);
       return nextProfile;
     } catch (error) {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
@@ -154,7 +151,7 @@ function AppShell({
     setJobsLoading(true);
     setJobsError(null);
     try {
-      const nextJobs = await getStaffJobs(sessionToken);
+      const nextJobs = await getStaffJobs();
       setJobs(nextJobs);
       const fallbackId = nextSelectedId ?? selectedJobIdRef.current ?? nextJobs[0]?.id ?? null;
       setSelectedJobId(fallbackId);
@@ -180,7 +177,7 @@ function AppShell({
     return () => {
       window.clearInterval(timer);
     };
-  }, [sessionToken]);
+  }, []);
 
   useEffect(() => {
     if (!selectedJobId) {
@@ -193,7 +190,7 @@ function AppShell({
       setJobCardLoading(true);
       setJobCardError(null);
       try {
-        const card = await getJobCard(sessionToken, selectedJobId);
+        const card = await getJobCard(undefined, selectedJobId);
         if (!active) {
           return;
         }
@@ -219,7 +216,7 @@ function AppShell({
     return () => {
       active = false;
     };
-  }, [onSignOut, selectedJobId, sessionToken]);
+  }, [onSignOut, selectedJobId]);
 
   async function runSetupAction(action: 'voice' | 'calendar' | 'pricing', callback: () => Promise<StaffProfile>) {
     setSetupBusy(action);
@@ -228,7 +225,6 @@ function AppShell({
     try {
       const nextProfile = await callback();
       setProfile(nextProfile);
-      updateStoredStaffProfile(nextProfile);
       setSetupMessage(
         action === 'voice'
           ? 'Voice consent updated.'
@@ -454,7 +450,6 @@ function AppShell({
                             <div key={photo.id} className="photo-thumb">
                               <ProtectedImage
                                 photoId={photo.id}
-                                sessionToken={sessionToken}
                                 alt={photo.caption ?? photo.filename}
                               />
                               <span>{photo.caption ?? photo.filename}</span>
@@ -538,7 +533,7 @@ function AppShell({
                     type="button"
                     onClick={() =>
                       void runSetupAction('voice', () =>
-                        saveVoiceConsent(sessionToken, {
+                        saveVoiceConsent(undefined, {
                           staffId: profile.id,
                           consent: profile.voiceConsentStatus !== 'granted',
                           signedBy: profile.fullName,
@@ -577,7 +572,7 @@ function AppShell({
                   onSubmit={(event) => {
                     event.preventDefault();
                     void runSetupAction('calendar', () =>
-                      connectCalendar(sessionToken, {
+                      connectCalendar(undefined, {
                         staffId: profile.id,
                         ...calendarDraft,
                       }),
@@ -629,7 +624,7 @@ function AppShell({
                   onSubmit={(event) => {
                     event.preventDefault();
                     void runSetupAction('pricing', async () => {
-                      const result = await savePricingInterview(sessionToken, {
+                      const result = await savePricingInterview(undefined, {
                         staffId: profile.id,
                         responses: pricingDraft,
                       });
@@ -795,7 +790,7 @@ function AppShell({
 function AuthScreen({
   onAuthenticated,
 }: {
-  onAuthenticated: (staff: StaffProfile, sessionToken: string, expiresAt: string) => void;
+  onAuthenticated: (staff: StaffProfile) => void;
 }) {
   const [inviteToken, setInviteToken] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -815,7 +810,7 @@ function AuthScreen({
         staffId: staffId.trim() || undefined,
       });
 
-      onAuthenticated(result.staff, result.session.token, result.session.expiresAt);
+      onAuthenticated(result.staff);
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 404) {
         setError('Invite token or OTP did not match.');
@@ -852,7 +847,7 @@ function AuthScreen({
               <div className="section-header">
                 <div className="eyebrow">Sign in</div>
                 <h2>Verify the staff session</h2>
-                <p className="muted">The Worker exchanges the invite token plus OTP for a staff session token.</p>
+                <p className="muted">The Worker exchanges the invite token plus OTP for a secure browser session.</p>
               </div>
 
               {error ? <p className="pill warn">{error}</p> : null}
@@ -942,39 +937,23 @@ function AuthScreen({
 }
 
 export default function App() {
-  const [sessionToken, setSessionToken] = useState<string>('');
   const [staff, setStaff] = useState<StaffProfile | null>(null);
-  const [hydrating, setHydrating] = useState(() => Boolean(readStaffSession()));
+  const [hydrating, setHydrating] = useState(true);
 
   useEffect(() => {
     let active = true;
-    const stored = readStaffSession();
-    if (!stored) {
-      setHydrating(false);
-      return;
-    }
-
-    if (new Date(stored.expiresAt).getTime() <= Date.now()) {
-      clearStaffSession();
-      setHydrating(false);
-      return;
-    }
 
     const hydrate = async () => {
       try {
-        const nextStaff = await getStaffProfile(stored.token);
+        const nextStaff = await getStaffProfile();
         if (!active) {
           return;
         }
-        setSessionToken(stored.token);
         setStaff(nextStaff);
-        updateStoredStaffProfile(nextStaff);
       } catch {
-        clearStaffSession();
         if (!active) {
           return;
         }
-        setSessionToken('');
         setStaff(null);
       } finally {
         if (active) {
@@ -990,15 +969,12 @@ export default function App() {
     };
   }, []);
 
-  function handleAuthenticated(nextStaff: StaffProfile, token: string, expiresAt: string) {
-    saveStaffSession({ token, expiresAt, staffId: nextStaff.id }, { staff: nextStaff });
-    setSessionToken(token);
+  function handleAuthenticated(nextStaff: StaffProfile) {
     setStaff(nextStaff);
   }
 
-  function signOut() {
-    clearStaffSession();
-    setSessionToken('');
+  async function signOut() {
+    await signOutStaff().catch(() => undefined);
     setStaff(null);
   }
 
@@ -1007,16 +983,20 @@ export default function App() {
       <div className="shell auth-shell">
         <div className="container">
           <div className="card">
-            <div className="card-inner">Restoring the current tab's staff session…</div>
+            <div className="card-inner">
+              <div className="eyebrow">Staff session</div>
+              <h1>Checking for an active secure staff session.</h1>
+              <p className="muted">Restoring the Worker-backed browser session before loading the queue.</p>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  if (!staff || !sessionToken) {
+  if (!staff) {
     return <AuthScreen onAuthenticated={handleAuthenticated} />;
   }
 
-  return <AppShell staff={staff} sessionToken={sessionToken} onSignOut={signOut} />;
+  return <AppShell staff={staff} onSignOut={() => void signOut()} />;
 }
