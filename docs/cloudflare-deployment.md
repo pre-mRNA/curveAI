@@ -92,6 +92,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
 - For Worker deploys, the checked-in `apps/edge-api/wrangler.jsonc` stays template-like and `npm run deploy:edge-api` renders a temporary config from `CLOUDFLARE_D1_DATABASE_ID` before calling `wrangler deploy`.
 - `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
+- That example includes the Worker deploy-time secrets (`ADMIN_TOKEN`, `AUTOMATION_SHARED_SECRET`) but the Pages review-gate secrets still have to be provisioned on each Pages project runtime.
 - Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
 - Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.

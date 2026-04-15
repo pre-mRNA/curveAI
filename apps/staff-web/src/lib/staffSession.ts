@@ -1,7 +1,5 @@
 import type { StaffProfile, StaffSession } from '../types';
 
-export const STAFF_SESSION_STORAGE_KEY = 'curve-ai.staff-session';
-
 export interface StoredStaffSession {
   token: string;
   expiresAt: string;

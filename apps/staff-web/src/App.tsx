@@ -944,7 +944,7 @@ function AuthScreen({
 export default function App() {
   const [sessionToken, setSessionToken] = useState<string>('');
   const [staff, setStaff] = useState<StaffProfile | null>(null);
-  const [hydrating, setHydrating] = useState(true);
+  const [hydrating, setHydrating] = useState(() => Boolean(readStaffSession()));
 
   useEffect(() => {
     let active = true;
@@ -1007,7 +1007,7 @@ export default function App() {
       <div className="shell auth-shell">
         <div className="container">
           <div className="card">
-            <div className="card-inner">Checking the current staff sign-in…</div>
+            <div className="card-inner">Restoring the current tab's staff session…</div>
           </div>
         </div>
       </div>

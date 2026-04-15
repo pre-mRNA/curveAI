@@ -63,7 +63,7 @@ function OnboardingLanding() {
                 <div className="eyebrow">Open the session</div>
                 <h2>Paste the invite code to open the onboarding session.</h2>
                 <p className="muted">
-                  If someone opens the onboarding Pages hostname directly, they can still recover the live flow from here.
+                  If someone opens the onboarding Pages hostname directly, they can jump into the invite route from here.
                 </p>
                 <form className="invite-entry-form" onSubmit={submitInviteCode}>
                   <label className="field" htmlFor="landing-invite-code">

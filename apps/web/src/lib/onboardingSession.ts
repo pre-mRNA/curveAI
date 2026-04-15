@@ -1,5 +1,3 @@
-export const ONBOARDING_SESSION_STORAGE_KEY = 'curve-ai.onboarding-session';
-
 export interface StoredOnboardingSession {
   inviteCode: string;
   sessionId: string;
