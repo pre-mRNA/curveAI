@@ -4,6 +4,7 @@
 
 - Provider adapters: replace mock ElevenLabs browser, Microsoft calendar, and Twilio behavior with live clients behind the existing onboarding and voice routes.
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
+- Cloudflare deployment: serve the web UI from Pages, use Workers/Functions for secure edge routes, and keep the control plane portable rather than collapsing the backend into static hosting assumptions.
 - Security hardening: add content sniffing for uploads and move from file-backed CRM persistence to a real database.
 
 ## Next

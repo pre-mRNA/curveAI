@@ -452,6 +452,8 @@ export function createApp(env: AppEnv) {
   const onboardingService = new OnboardingService(env, {
     calendar: new MockMicrosoftCalendarAdapter({
       clientId: process.env.MICROSOFT_GRAPH_CLIENT_ID,
+      clientSecret: process.env.MICROSOFT_GRAPH_CLIENT_SECRET,
+      redirectUri: process.env.MICROSOFT_REDIRECT_URI,
       tenantId: process.env.MICROSOFT_TENANT_ID,
     }),
     reasoning: new MockReasoningProvider(),
@@ -650,17 +652,24 @@ export function createApp(env: AppEnv) {
       return;
     }
 
-    const updated = await onboardingService.appendTurn(session, input);
-    if (!updated) {
-      return respondError(res, 404, "Onboarding session not found");
-    }
+    try {
+      const updated = await onboardingService.appendTurn(session, input);
+      if (!updated) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
 
-    return res.status(201).json({
-      ok: true,
-      session: updated,
-      nextQuestion: updated.nextQuestion,
-      interviewerBrief: updated.analysis.interviewerBrief,
-    });
+      return res.status(201).json({
+        ok: true,
+        session: updated,
+        nextQuestion: updated.nextQuestion,
+        interviewerBrief: updated.analysis.interviewerBrief,
+      });
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.post("/onboarding/sessions/:id/next-question", (req, res) => {
@@ -704,6 +713,7 @@ export function createApp(env: AppEnv) {
       onboardingReviewPatchSchema,
       {
         businessSummary: asString(body.businessSummary),
+        staffProfile: asObject(body.staffProfile),
         communicationProfile: asObject(body.communicationProfile),
         pricingProfile: asObject(body.pricingProfile),
         businessPractices: asObject(body.businessPractices),
@@ -715,15 +725,22 @@ export function createApp(env: AppEnv) {
       return;
     }
 
-    const updated = onboardingService.updateReview(session, input);
-    if (!updated) {
-      return respondError(res, 404, "Onboarding session not found");
-    }
+    try {
+      const updated = onboardingService.updateReview(session, input);
+      if (!updated) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
 
-    return res.json({
-      ok: true,
-      session: updated,
-    });
+      return res.json({
+        ok: true,
+        session: updated,
+      });
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.get("/onboarding/sessions/:id/calendar/microsoft/start", async (req, res) => {
@@ -732,16 +749,23 @@ export function createApp(env: AppEnv) {
       return;
     }
 
-    const updated = await onboardingService.startCalendar(session);
-    if (!updated) {
-      return respondError(res, 404, "Onboarding session not found");
-    }
+    try {
+      const updated = await onboardingService.startCalendar(session);
+      if (!updated) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
 
-    return res.json({
-      ok: true,
-      calendar: updated.calendar,
-      session: updated,
-    });
+      return res.json({
+        ok: true,
+        calendar: updated.calendar,
+        session: updated,
+      });
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.get("/onboarding/calendar/microsoft/callback", async (req, res) => {
@@ -750,22 +774,29 @@ export function createApp(env: AppEnv) {
       return respondError(res, 400, "state is required");
     }
 
-    const summary = await onboardingService.completeCalendar(state, {
-      code: asString(req.query.code),
-      accountEmail: asString(req.query.email),
-      calendarLabel: asString(req.query.calendar),
-    });
-    if (!summary) {
-      return respondError(res, 404, "Onboarding session not found");
-    }
+    try {
+      const summary = await onboardingService.completeCalendar(state, {
+        code: asString(req.query.code),
+        accountEmail: asString(req.query.email),
+        calendarLabel: asString(req.query.calendar),
+      });
+      if (!summary) {
+        return respondError(res, 404, "Onboarding session not found");
+      }
 
-    const redirectUrl = new URL(
-      `/onboard/${summary.inviteCode}`,
-      env.publicAppUrl.endsWith("/") ? env.publicAppUrl : `${env.publicAppUrl}/`,
-    );
-    redirectUrl.searchParams.set("session", summary.id);
-    redirectUrl.searchParams.set("calendar", summary.calendar?.status ?? "connected");
-    return res.redirect(302, redirectUrl.toString());
+      const redirectUrl = new URL(
+        `/onboard/${summary.inviteCode}`,
+        env.publicAppUrl.endsWith("/") ? env.publicAppUrl : `${env.publicAppUrl}/`,
+      );
+      redirectUrl.searchParams.set("session", summary.id);
+      redirectUrl.searchParams.set("calendar", summary.calendar?.status ?? "connected");
+      return res.redirect(302, redirectUrl.toString());
+    } catch (error) {
+      if (handleOnboardingError(res, error)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.post(

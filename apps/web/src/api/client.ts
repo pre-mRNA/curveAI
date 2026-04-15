@@ -139,7 +139,7 @@ function mapSession(session: BackendSessionSummary): OnboardingSession {
     })),
     summary: session.review.businessSummary,
     staffName: session.staffName,
-    companyName: session.review.crmDiscovery.currentSystem === 'Unknown' ? '' : session.review.crmDiscovery.currentSystem,
+    companyName: session.review.staffProfile.companyName,
     calendarConnected: session.calendar?.status === 'connected',
     voiceSampleUploaded: Boolean(session.voiceSample),
     updatedAt: session.updatedAt ?? new Date().toISOString(),
@@ -157,9 +157,9 @@ function mapReview(review: BackendReview, analysis: BackendAnalysis): Onboarding
       notes: item.evidence[0] ?? null,
     })),
     profile: {
-      staffName: '',
-      companyName: '',
-      role: '',
+      staffName: review.staffProfile.staffName,
+      companyName: review.staffProfile.companyName,
+      role: review.staffProfile.role,
       serviceArea: review.businessPractices.serviceAreas.join(', '),
       services: review.businessPractices.services.join(', '),
       hours: review.businessPractices.operatingHours,
@@ -169,7 +169,7 @@ function mapReview(review: BackendReview, analysis: BackendAnalysis): Onboarding
       riskTolerance: review.communicationProfile.riskTolerance,
       escalationRules: review.businessPractices.escalationRules.join('; '),
       exclusions: review.businessPractices.exclusions.join('; '),
-      calendarProvider: 'Microsoft',
+      calendarProvider: review.staffProfile.calendarProvider,
       crmProvider: review.crmDiscovery.currentSystem,
     },
   };
@@ -317,6 +317,12 @@ export const apiClient = {
       },
       body: JSON.stringify({
         businessSummary: review.summary,
+        staffProfile: {
+          staffName: review.staffName,
+          companyName: review.companyName,
+          role: review.role,
+          calendarProvider: review.calendarProvider,
+        },
         communicationProfile: {
           tone: review.communicationStyle,
           salesStyle: review.salesStyle,

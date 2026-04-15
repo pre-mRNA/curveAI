@@ -161,6 +161,10 @@ export class MockReasoningProvider implements ReasoningProvider {
         participantTurns[0]?.text ??
         session.review.businessSummary ??
         `${session.staffName} onboarding interview is in progress.`,
+      staffProfile: {
+        ...session.review.staffProfile,
+        staffName: session.review.staffProfile.staffName || session.staffName,
+      },
       communicationProfile: {
         tone: detectFirstMatch(combinedText, [
           ["friendly", "Warm and friendly"],
@@ -306,8 +310,20 @@ export class MockMicrosoftCalendarAdapter implements CalendarAdapter {
     private readonly config: {
       clientId?: string;
       tenantId?: string;
+      clientSecret?: string;
+      redirectUri?: string;
+      graphBaseUrl?: string;
     } = {},
   ) {}
+
+  private isConfigured(): boolean {
+    return Boolean(
+      this.config.clientId &&
+        this.config.tenantId &&
+        this.config.clientSecret &&
+        this.config.redirectUri,
+    );
+  }
 
   async startAuth(input: {
     sessionId: string;
@@ -317,15 +333,17 @@ export class MockMicrosoftCalendarAdapter implements CalendarAdapter {
     publicAppUrl: string;
   }): Promise<CalendarConnectionRecord> {
     const state = crypto.randomBytes(18).toString("hex");
-    const callbackUrl = `${input.publicBaseUrl.replace(/\/$/, "")}/onboarding/calendar/microsoft/callback`;
+    const callbackUrl =
+      this.config.redirectUri ??
+      `${input.publicBaseUrl.replace(/\/$/, "")}/onboarding/calendar/microsoft/callback`;
     const authUrl =
-      this.config.clientId && this.config.tenantId
-        ? `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${encodeURIComponent(this.config.clientId)}&response_type=code&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent("openid profile email offline_access User.Read Calendars.ReadWrite")}&state=${encodeURIComponent(state)}`
+      this.isConfigured()
+        ? `https://login.microsoftonline.com/${encodeURIComponent(this.config.tenantId ?? "common")}/oauth2/v2.0/authorize?client_id=${encodeURIComponent(this.config.clientId ?? "")}&response_type=code&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent("openid profile email offline_access User.Read Calendars.ReadWrite")}&state=${encodeURIComponent(state)}`
         : `${callbackUrl}?state=${encodeURIComponent(state)}&code=mock-code&email=${encodeURIComponent(`${slugify(input.staffName)}@example.com`)}&calendar=${encodeURIComponent(`${input.staffName} Calendar`)}&invite=${encodeURIComponent(input.inviteCode)}`;
 
     return {
       provider: "microsoft",
-      mode: this.config.clientId ? "configured" : "mock",
+      mode: this.isConfigured() ? "configured" : "mock",
       status: "pending",
       authUrl,
       authState: state,
@@ -338,9 +356,82 @@ export class MockMicrosoftCalendarAdapter implements CalendarAdapter {
     accountEmail?: string;
     calendarLabel?: string;
   }): Promise<CalendarConnectionRecord> {
+    if (this.isConfigured()) {
+      if (!input.code) {
+        throw new Error("Microsoft authorization code is required.");
+      }
+
+      const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(this.config.tenantId ?? "common")}/oauth2/v2.0/token`;
+      const tokenBody = new URLSearchParams({
+        client_id: this.config.clientId ?? "",
+        client_secret: this.config.clientSecret ?? "",
+        code: input.code,
+        grant_type: "authorization_code",
+        redirect_uri: this.config.redirectUri ?? "",
+      });
+
+      const tokenResponse = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: tokenBody.toString(),
+      });
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text().catch(() => "");
+        throw new Error(`Microsoft token exchange failed${errorText ? `: ${errorText}` : "."}`);
+      }
+
+      const tokenPayload = (await tokenResponse.json()) as {
+        access_token?: string;
+      };
+      if (!tokenPayload.access_token) {
+        throw new Error("Microsoft token exchange returned no access token.");
+      }
+
+      const graphBaseUrl = this.config.graphBaseUrl ?? "https://graph.microsoft.com";
+      const graphHeaders = {
+        authorization: `Bearer ${tokenPayload.access_token}`,
+      };
+
+      const profileResponse = await fetch(`${graphBaseUrl}/v1.0/me?$select=mail,userPrincipalName,displayName`, {
+        headers: graphHeaders,
+      });
+      if (!profileResponse.ok) {
+        const errorText = await profileResponse.text().catch(() => "");
+        throw new Error(`Microsoft profile lookup failed${errorText ? `: ${errorText}` : "."}`);
+      }
+
+      const profile = (await profileResponse.json()) as {
+        mail?: string;
+        userPrincipalName?: string;
+        displayName?: string;
+      };
+
+      let calendarLabel = "Primary";
+      const calendarResponse = await fetch(`${graphBaseUrl}/v1.0/me/calendar?$select=name`, {
+        headers: graphHeaders,
+      });
+      if (calendarResponse.ok) {
+        const calendar = (await calendarResponse.json()) as { name?: string };
+        if (calendar.name) {
+          calendarLabel = calendar.name;
+        }
+      }
+
+      return {
+        provider: "microsoft",
+        mode: "configured",
+        status: "connected",
+        accountEmail: profile.mail ?? profile.userPrincipalName ?? input.accountEmail,
+        calendarLabel,
+        connectedAt: new Date().toISOString(),
+      };
+    }
+
     return {
       provider: "microsoft",
-      mode: this.config.clientId ? "configured" : "mock",
+      mode: "mock",
       status: "connected",
       authState: input.state,
       accountEmail: input.accountEmail ?? "connected@example.com",

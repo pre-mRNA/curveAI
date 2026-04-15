@@ -31,6 +31,7 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
     staffId: 'staff_1',
     staffName: 'Jordan',
     participantToken: 'session-token',
+    expiresAt: '2026-04-17T10:00:00.000Z',
     consentAccepted: true,
     cloneConsentAccepted: true,
     coverageScore: 0.63,
@@ -42,6 +43,12 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
     },
     review: {
       businessSummary: 'Jordan Plumbing onboarding is underway.',
+      staffProfile: {
+        staffName: 'Jordan',
+        companyName: 'Jordan Plumbing',
+        role: 'Owner',
+        calendarProvider: 'Microsoft',
+      },
       communicationProfile: {
         tone: 'Direct and calm',
         salesStyle: 'Consultative',
@@ -107,9 +114,11 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('onboarding route', () => {
   const fetchMock = vi.fn();
+  let savedReviewPayload: Record<string, unknown> | null = null;
 
   beforeEach(() => {
     clearOnboardingSession();
+    savedReviewPayload = null;
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -188,11 +197,16 @@ describe('onboarding route', () => {
       }
 
       if (url.pathname === '/api/onboarding/sessions/sess_1/review' && method === 'POST') {
+        savedReviewPayload = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         return jsonResponse({
           session: backendSession({
             status: 'calendar',
             review: {
               ...backendSession().review,
+              staffProfile: {
+                ...backendSession().review.staffProfile,
+                ...((savedReviewPayload?.staffProfile as Record<string, unknown> | undefined) ?? {}),
+              },
               missingFields: [],
             },
             analysis: {
@@ -268,10 +282,26 @@ describe('onboarding route', () => {
       expect(screen.getByDisplayValue('ServiceM8')).toBeInTheDocument();
     });
 
+    await user.clear(screen.getByLabelText(/staff name/i));
+    await user.type(screen.getByLabelText(/staff name/i), 'Jordan S');
+    await user.clear(screen.getByLabelText(/company name/i));
+    await user.type(screen.getByLabelText(/company name/i), 'Jordan Plumbing Co');
+    await user.clear(screen.getByLabelText(/^role$/i));
+    await user.type(screen.getByLabelText(/^role$/i), 'Dispatcher');
+
     await user.click(screen.getByRole('button', { name: /save review and continue/i }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /connect the staff calendar/i })).toBeInTheDocument();
+    });
+
+    expect(savedReviewPayload).toMatchObject({
+      staffProfile: {
+        staffName: 'Jordan S',
+        companyName: 'Jordan Plumbing Co',
+        role: 'Dispatcher',
+        calendarProvider: 'Microsoft',
+      },
     });
 
     await user.click(screen.getByRole('button', { name: /connect microsoft calendar/i }));

@@ -174,6 +174,15 @@ export const onboardingTurnInputSchema = z
 export const onboardingReviewPatchSchema = z
   .object({
     businessSummary: z.string().min(1).optional(),
+    staffProfile: z
+      .object({
+        staffName: z.string().min(1).optional(),
+        companyName: z.string().min(1).optional(),
+        role: z.string().min(1).optional(),
+        calendarProvider: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     communicationProfile: z
       .object({
         tone: z.string().min(1).optional(),

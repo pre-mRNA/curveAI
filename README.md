@@ -5,6 +5,7 @@ Curve AI is a greenfield platform for tradie-focused voice agents, dynamic quoti
 ## Active Plan
 
 The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
+Cloudflare deployment guidance for the onboarding app is in [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md).
 
 ## Workspace
 
@@ -38,6 +39,7 @@ The current working plan is persisted in [docs/agent-log.md](docs/agent-log.md).
 - `/onboard/:inviteCode` is the first real onboarding surface.
 - The browser flow runs consent -> interview -> extraction review -> Microsoft calendar connect -> clean voice sample -> finalize.
 - API reasoning, realtime voice, calendar, and clone behavior sit behind provider interfaces so the control plane can move toward self-hosted Australian infrastructure later without rewriting the product flow.
+- Onboarding session bearer tokens now expire with the invite window, completed sessions are immutable, and configured Microsoft callbacks require a real auth code instead of trusting query-string identity data.
 
 ## Verification
 

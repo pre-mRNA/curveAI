@@ -79,8 +79,16 @@ export interface CRMDiscoveryProfileRecord {
   notes: string[];
 }
 
+export interface StaffProfileRecord {
+  staffName: string;
+  companyName: string;
+  role: string;
+  calendarProvider: string;
+}
+
 export interface ExtractionReviewRecord {
   businessSummary: string;
+  staffProfile: StaffProfileRecord;
   communicationProfile: CommunicationProfileRecord;
   pricingProfile: PricingProfileSummaryRecord;
   businessPractices: BusinessPracticeProfileRecord;
@@ -136,6 +144,7 @@ export interface OnboardingSessionRecord {
   staffId: string;
   staffName: string;
   participantToken: string;
+  expiresAt: string;
   status: OnboardingSessionStatus;
   consentAccepted: boolean;
   cloneConsentAccepted: boolean;
@@ -154,9 +163,15 @@ interface OnboardingSnapshot {
   sessions: OnboardingSessionRecord[];
 }
 
-function createDefaultReview(fullName?: string): ExtractionReviewRecord {
+function createDefaultReview(fullName?: string, role?: string): ExtractionReviewRecord {
   return {
     businessSummary: fullName ? `${fullName} onboarding has started.` : "Onboarding interview in progress.",
+    staffProfile: {
+      staffName: fullName ?? "",
+      companyName: "",
+      role: role ?? "",
+      calendarProvider: "Microsoft",
+    },
     communicationProfile: {
       tone: "Professional and calm",
       salesStyle: "Consultative",
@@ -192,6 +207,39 @@ function createDefaultAnalysis(): OnboardingAnalysisRecord {
     recommendedQuestions: [],
     coverageScore: 0,
     interviewerBrief: "Start with business scope and service area before probing pricing.",
+  };
+}
+
+function normalizeReview(
+  review: Partial<ExtractionReviewRecord> | undefined,
+  fullName?: string,
+  role?: string,
+): ExtractionReviewRecord {
+  const defaults = createDefaultReview(fullName, role);
+  return {
+    ...defaults,
+    ...review,
+    staffProfile: {
+      ...defaults.staffProfile,
+      ...(review?.staffProfile ?? {}),
+    },
+    communicationProfile: {
+      ...defaults.communicationProfile,
+      ...(review?.communicationProfile ?? {}),
+    },
+    pricingProfile: {
+      ...defaults.pricingProfile,
+      ...(review?.pricingProfile ?? {}),
+    },
+    businessPractices: {
+      ...defaults.businessPractices,
+      ...(review?.businessPractices ?? {}),
+    },
+    crmDiscovery: {
+      ...defaults.crmDiscovery,
+      ...(review?.crmDiscovery ?? {}),
+    },
+    missingFields: Array.isArray(review?.missingFields) ? review.missingFields : defaults.missingFields,
   };
 }
 
@@ -258,7 +306,16 @@ export class OnboardingStore {
       const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
 
       invites.forEach((invite) => this.invites.set(invite.id, invite));
-      sessions.forEach((session) => this.sessions.set(session.id, session));
+      sessions.forEach((session) => {
+        const invite = invites.find((item) => item.id === session.inviteId) ?? invites.find((item) => item.code === session.inviteCode);
+        const normalizedSession: OnboardingSessionRecord = {
+          ...session,
+          staffName: session.staffName ?? invite?.fullName ?? "",
+          expiresAt: session.expiresAt ?? invite?.expiresAt ?? new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+          review: normalizeReview(session.review, session.staffName ?? invite?.fullName, invite?.role),
+        };
+        this.sessions.set(normalizedSession.id, normalizedSession);
+      });
     });
   }
 
@@ -336,9 +393,16 @@ export class OnboardingStore {
       return undefined;
     }
 
+    if (invite.status === "completed") {
+      return undefined;
+    }
+
     if (invite.sessionId) {
       const existing = this.sessions.get(invite.sessionId);
       if (existing) {
+        if (existing.status === "completed") {
+          return undefined;
+        }
         return existing;
       }
     }
@@ -351,6 +415,7 @@ export class OnboardingStore {
       staffId: invite.staffId,
       staffName: invite.fullName,
       participantToken: crypto.randomBytes(24).toString("hex"),
+      expiresAt: invite.expiresAt,
       status: "pending",
       consentAccepted: false,
       cloneConsentAccepted: false,
@@ -358,7 +423,7 @@ export class OnboardingStore {
       updatedAt: now,
       turns: [],
       analysis: createDefaultAnalysis(),
-      review: createDefaultReview(invite.fullName),
+      review: createDefaultReview(invite.fullName, invite.role),
     };
 
     invite.status = "started";
@@ -375,14 +440,20 @@ export class OnboardingStore {
 
   authenticateSession(sessionId: string, token: string): OnboardingSessionRecord | undefined {
     const session = this.sessions.get(sessionId);
-    if (!session || session.participantToken !== token) {
+    if (!session || session.participantToken !== token || isExpired(session.expiresAt)) {
       return undefined;
     }
     return session;
   }
 
   findSessionByCalendarState(state: string): OnboardingSessionRecord | undefined {
-    return [...this.sessions.values()].find((session) => session.calendar?.authState === state);
+    return [...this.sessions.values()].find(
+      (session) =>
+        session.calendar?.authState === state &&
+        session.calendar?.status === "pending" &&
+        !isExpired(session.expiresAt) &&
+        session.status !== "completed",
+    );
   }
 
   saveSession(session: OnboardingSessionRecord): OnboardingSessionRecord {
@@ -454,6 +525,7 @@ export class OnboardingStore {
     }
 
     session.review = review;
+    session.staffName = review.staffProfile.staffName.trim() || session.staffName;
     session.status = session.calendar?.status === "connected" ? "voice_sample" : "review";
     return this.saveSession(session);
   }
@@ -501,3 +573,7 @@ export class OnboardingStore {
 }
 
 export const onboardingStore = new OnboardingStore();
+
+function isExpired(expiresAt: string): boolean {
+  return new Date(expiresAt).getTime() < Date.now();
+}

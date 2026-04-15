@@ -65,8 +65,16 @@ export const crmDiscoveryProfileSchema = z.object({
   notes: z.array(z.string()),
 });
 
+export const onboardingStaffProfileSchema = z.object({
+  staffName: z.string(),
+  companyName: z.string(),
+  role: z.string(),
+  calendarProvider: z.string(),
+});
+
 export const extractionReviewSchema = z.object({
   businessSummary: z.string(),
+  staffProfile: onboardingStaffProfileSchema,
   communicationProfile: communicationProfileSchema,
   pricingProfile: pricingProfileSummarySchema,
   businessPractices: businessPracticeProfileSchema,
@@ -128,6 +136,7 @@ export const onboardingSessionSummarySchema = z.object({
   staffId: z.string(),
   staffName: z.string(),
   participantToken: z.string(),
+  expiresAt: z.string(),
   consentAccepted: z.boolean(),
   cloneConsentAccepted: z.boolean(),
   coverageScore: z.number().min(0).max(1),
@@ -174,6 +183,7 @@ export type CommunicationProfile = z.infer<typeof communicationProfileSchema>;
 export type PricingProfileSummary = z.infer<typeof pricingProfileSummarySchema>;
 export type BusinessPracticeProfile = z.infer<typeof businessPracticeProfileSchema>;
 export type CRMDiscoveryProfile = z.infer<typeof crmDiscoveryProfileSchema>;
+export type OnboardingStaffProfile = z.infer<typeof onboardingStaffProfileSchema>;
 export type ExtractionReview = z.infer<typeof extractionReviewSchema>;
 export type SupervisorPrompt = z.infer<typeof supervisorPromptSchema>;
 export type OnboardingAnalysis = z.infer<typeof onboardingAnalysisSchema>;

@@ -514,6 +514,12 @@ test("onboarding flow creates a portable interview session and finalizes a staff
     `/onboarding/sessions/${sessionId}/review`,
     {
       businessSummary: "Focused plumbing business covering Sydney inner west callouts.",
+      staffProfile: {
+        staffName: "Jordan Reviewer",
+        companyName: "Curve Plumbing",
+        role: "Owner",
+        calendarProvider: "Microsoft",
+      },
       businessPractices: {
         serviceAreas: ["Inner West", "Sydney"],
       },
@@ -522,6 +528,8 @@ test("onboarding flow creates a portable interview session and finalizes a staff
   );
   assert.equal(reviewPatch.response.status, 200);
   assert.equal(reviewPatch.body.session.review.businessSummary, "Focused plumbing business covering Sydney inner west callouts.");
+  assert.equal(reviewPatch.body.session.review.staffProfile.staffName, "Jordan Reviewer");
+  assert.equal(reviewPatch.body.session.review.staffProfile.companyName, "Curve Plumbing");
 
   const calendarStart = await getJson(
     baseUrl,
@@ -573,6 +581,7 @@ test("onboarding flow creates a portable interview session and finalizes a staff
   assert.equal(finalized.response.status, 200);
   assert.equal(onboardingSessionSummarySchema.safeParse(finalized.body.session).success, true);
   assert.equal(finalized.body.session.status, "completed");
+  assert.equal(finalized.body.session.staffName, "Jordan Reviewer");
   assert.equal(finalized.body.staff.id, invite.body.staff.id);
 });
 
@@ -658,6 +667,196 @@ test("onboarding finalize blocks incomplete sessions and voice samples require a
   );
   assert.equal(sampleWithoutFile.response.status, 400);
   assert.match(readErrorMessage(sampleWithoutFile.body), /audio sample file/i);
+});
+
+test("expired onboarding sessions reject stale bearer tokens", async () => {
+  const baseUrl = await startServer(makeEnv());
+
+  const invite = await postJson(
+    baseUrl,
+    "/onboarding/invites",
+    {
+      fullName: "Expired Session",
+      phoneNumber: "+61400000003",
+    },
+    adminHeaders(),
+  );
+  const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+    inviteCode: invite.body.invite.code,
+  });
+  const sessionId = start.body.session.id as string;
+  const participantToken = start.body.session.participantToken as string;
+
+  const session = onboardingStore.getSession(sessionId);
+  assert.ok(session);
+  session.expiresAt = new Date(Date.now() - 60_000).toISOString();
+  onboardingStore.saveSession(session);
+
+  const expiredRead = await getJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}`,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(expiredRead.response.status, 403);
+});
+
+test("completed onboarding sessions reject further mutation", async () => {
+  const baseUrl = await startServer(makeEnv());
+
+  const invite = await postJson(
+    baseUrl,
+    "/onboarding/invites",
+    {
+      fullName: "Locked Session",
+      phoneNumber: "+61400000004",
+    },
+    adminHeaders(),
+  );
+  const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+    inviteCode: invite.body.invite.code,
+  });
+  const sessionId = start.body.session.id as string;
+  const participantToken = start.body.session.participantToken as string;
+
+  await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/token`,
+    {
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    },
+    onboardingHeaders(participantToken),
+  );
+
+  const calendarStart = await getJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/calendar/microsoft/start`,
+    onboardingHeaders(participantToken),
+  );
+  const callbackUrl = new URL(calendarStart.body.calendar.authUrl as string);
+  const callbackTarget = new URL(callbackUrl.pathname + callbackUrl.search, baseUrl);
+  const calendarCallback = await fetch(callbackTarget.toString(), {
+    redirect: "manual",
+  });
+  assert.equal(calendarCallback.status, 302);
+
+  const voiceSampleForm = new FormData();
+  voiceSampleForm.set("sampleLabel", "Immutable sample");
+  voiceSampleForm.set("durationSeconds", "60");
+  voiceSampleForm.set(
+    "sample",
+    new File([Buffer.from("RIFF....WEBM")], "immutable.webm", {
+      type: "audio/webm",
+    }),
+  );
+  const voiceSample = await postForm(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/voice-sample`,
+    voiceSampleForm,
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(voiceSample.response.status, 200);
+
+  const finalized = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/finalize`,
+    {},
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(finalized.response.status, 200);
+
+  const extraTurn = await postJson(
+    baseUrl,
+    `/onboarding/sessions/${sessionId}/turns`,
+    {
+      speaker: "participant",
+      text: "Try to change the completed interview.",
+    },
+    onboardingHeaders(participantToken),
+  );
+  assert.equal(extraTurn.response.status, 409);
+  assert.match(readErrorMessage(extraTurn.body), /completed onboarding sessions/i);
+});
+
+test("configured Microsoft callback requires a real auth code", async () => {
+  const previousClientId = process.env.MICROSOFT_GRAPH_CLIENT_ID;
+  const previousClientSecret = process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
+  const previousTenantId = process.env.MICROSOFT_TENANT_ID;
+  const previousRedirectUri = process.env.MICROSOFT_REDIRECT_URI;
+
+  process.env.MICROSOFT_GRAPH_CLIENT_ID = "configured-client-id";
+  process.env.MICROSOFT_GRAPH_CLIENT_SECRET = "configured-client-secret";
+  process.env.MICROSOFT_TENANT_ID = "common";
+  process.env.MICROSOFT_REDIRECT_URI = "http://127.0.0.1/onboarding/calendar/microsoft/callback";
+
+  try {
+    const baseUrl = await startServer(makeEnv());
+
+    const invite = await postJson(
+      baseUrl,
+      "/onboarding/invites",
+      {
+        fullName: "Configured Microsoft",
+        phoneNumber: "+61400000005",
+      },
+      adminHeaders(),
+    );
+    const start = await postJson(baseUrl, "/onboarding/sessions/start", {
+      inviteCode: invite.body.invite.code,
+    });
+    const sessionId = start.body.session.id as string;
+    const participantToken = start.body.session.participantToken as string;
+
+    await postJson(
+      baseUrl,
+      `/onboarding/sessions/${sessionId}/token`,
+      {
+        consentAccepted: true,
+        cloneConsentAccepted: true,
+      },
+      onboardingHeaders(participantToken),
+    );
+
+    const calendarStart = await getJson(
+      baseUrl,
+      `/onboarding/sessions/${sessionId}/calendar/microsoft/start`,
+      onboardingHeaders(participantToken),
+    );
+    assert.equal(calendarStart.response.status, 200);
+
+    const authUrl = new URL(calendarStart.body.calendar.authUrl as string);
+    const state = authUrl.searchParams.get("state");
+    assert.ok(state);
+
+    const callbackResponse = await fetch(
+      `${baseUrl}/onboarding/calendar/microsoft/callback?state=${encodeURIComponent(state ?? "")}&email=spoofed@example.com`,
+      { redirect: "manual" },
+    );
+    const callbackBody = await callbackResponse.json();
+    assert.equal(callbackResponse.status, 400);
+    assert.match(readErrorMessage(callbackBody), /authorization code/i);
+  } finally {
+    if (previousClientId === undefined) {
+      delete process.env.MICROSOFT_GRAPH_CLIENT_ID;
+    } else {
+      process.env.MICROSOFT_GRAPH_CLIENT_ID = previousClientId;
+    }
+    if (previousClientSecret === undefined) {
+      delete process.env.MICROSOFT_GRAPH_CLIENT_SECRET;
+    } else {
+      process.env.MICROSOFT_GRAPH_CLIENT_SECRET = previousClientSecret;
+    }
+    if (previousTenantId === undefined) {
+      delete process.env.MICROSOFT_TENANT_ID;
+    } else {
+      process.env.MICROSOFT_TENANT_ID = previousTenantId;
+    }
+    if (previousRedirectUri === undefined) {
+      delete process.env.MICROSOFT_REDIRECT_URI;
+    } else {
+      process.env.MICROSOFT_REDIRECT_URI = previousRedirectUri;
+    }
+  }
 });
 
 test("malformed CRM snapshots are quarantined and ignored", async () => {

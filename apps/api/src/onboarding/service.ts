@@ -9,10 +9,12 @@ import {
   type ExtractionReviewRecord,
   type OnboardingSessionRecord,
   type PricingProfileSummaryRecord,
+  type StaffProfileRecord,
 } from "../store/onboarding-store";
 
 export interface ExtractionReviewPatch {
   businessSummary?: string;
+  staffProfile?: Partial<StaffProfileRecord>;
   communicationProfile?: Partial<CommunicationProfileRecord>;
   pricingProfile?: Partial<PricingProfileSummaryRecord>;
   businessPractices?: Partial<BusinessPracticeProfileRecord>;
@@ -85,6 +87,12 @@ export class OnboardingService {
     return this.toSessionSummary(session);
   }
 
+  private ensureMutable(session: OnboardingSessionRecord, action: string) {
+    if (session.status === "completed") {
+      throw new OnboardingRuleError(`Completed onboarding sessions cannot ${action}.`);
+    }
+  }
+
   async provisionRealtimeVoice(
     session: OnboardingSessionRecord,
     input: { consentAccepted: boolean; cloneConsentAccepted: boolean },
@@ -96,14 +104,12 @@ export class OnboardingService {
       );
     }
 
-    if (session.status === "completed") {
-      throw new OnboardingRuleError("Completed onboarding sessions cannot start a new realtime interview.");
-    }
+    this.ensureMutable(session, "start a new realtime interview");
 
     onboardingStore.setConsent(session.id, input.consentAccepted, input.cloneConsentAccepted);
     const voiceSession = await this.providers.realtimeVoice.issueBrowserSession({
       sessionId: session.id,
-      staffName: session.staffName,
+      staffName: session.review.staffProfile.staffName.trim() || session.staffName,
       consentAccepted: input.consentAccepted,
     });
     const updated = onboardingStore.setVoiceSession(session.id, voiceSession);
@@ -118,6 +124,7 @@ export class OnboardingService {
       questionId?: string;
     },
   ) {
+    this.ensureMutable(session, "accept more interview turns");
     const updated = onboardingStore.appendTurn(session.id, input);
     if (!updated) {
       return undefined;
@@ -130,9 +137,14 @@ export class OnboardingService {
   }
 
   updateReview(session: OnboardingSessionRecord, patch: ExtractionReviewPatch) {
+    this.ensureMutable(session, "change the extraction review");
     const merged: ExtractionReviewRecord = {
       ...session.review,
       ...patch,
+      staffProfile: {
+        ...session.review.staffProfile,
+        ...patch.staffProfile,
+      },
       communicationProfile: {
         ...session.review.communicationProfile,
         ...patch.communicationProfile,
@@ -156,13 +168,22 @@ export class OnboardingService {
   }
 
   async startCalendar(session: OnboardingSessionRecord) {
-    const calendar = await this.providers.calendar.startAuth({
-      sessionId: session.id,
-      inviteCode: session.inviteCode,
-      staffName: session.staffName,
-      publicBaseUrl: this.env.publicBaseUrl,
-      publicAppUrl: this.env.publicAppUrl,
-    });
+    this.ensureMutable(session, "start calendar authorization");
+    let calendar;
+    try {
+      calendar = await this.providers.calendar.startAuth({
+        sessionId: session.id,
+        inviteCode: session.inviteCode,
+        staffName: session.review.staffProfile.staffName.trim() || session.staffName,
+        publicBaseUrl: this.env.publicBaseUrl,
+        publicAppUrl: this.env.publicAppUrl,
+      });
+    } catch (error) {
+      throw new OnboardingRuleError(
+        error instanceof Error ? error.message : "Microsoft calendar authorization could not be started.",
+        502,
+      );
+    }
     const updated = onboardingStore.setCalendar(session.id, calendar);
     return updated ? this.toSessionSummary(updated) : undefined;
   }
@@ -173,13 +194,36 @@ export class OnboardingService {
       return undefined;
     }
 
-    const calendar = await this.providers.calendar.completeAuth({
-      state,
-      code: input.code,
-      accountEmail: input.accountEmail,
-      calendarLabel: input.calendarLabel,
-    });
-    const updated = onboardingStore.setCalendar(session.id, calendar);
+    this.ensureMutable(session, "complete calendar authorization");
+
+    if (!session.calendar?.authState || session.calendar.authState !== state) {
+      throw new OnboardingRuleError("Microsoft calendar authorization state is invalid or has already been used.", 400);
+    }
+
+    if (session.calendar.mode === "configured" && !input.code) {
+      throw new OnboardingRuleError("Microsoft returned no authorization code.", 400);
+    }
+
+    let calendar;
+    try {
+      calendar = await this.providers.calendar.completeAuth({
+        state,
+        code: input.code,
+        accountEmail: input.accountEmail,
+        calendarLabel: input.calendarLabel,
+      });
+    } catch (error) {
+      throw new OnboardingRuleError(
+        error instanceof Error ? error.message : "Microsoft calendar authorization could not be verified.",
+        502,
+      );
+    }
+    const normalizedCalendar = {
+      ...calendar,
+      authState: undefined,
+      authUrl: undefined,
+    };
+    const updated = onboardingStore.setCalendar(session.id, normalizedCalendar);
     if (!updated) {
       return undefined;
     }
@@ -187,8 +231,8 @@ export class OnboardingService {
     crmStore.connectCalendar({
       staffId: updated.staffId,
       provider: "outlook",
-      accountEmail: calendar.accountEmail,
-      calendarId: calendar.calendarLabel,
+      accountEmail: normalizedCalendar.accountEmail,
+      calendarId: normalizedCalendar.calendarLabel,
       timezone: "Australia/Sydney",
       externalConnectionId: state,
     });
@@ -210,6 +254,7 @@ export class OnboardingService {
       };
     },
   ) {
+    this.ensureMutable(session, "replace the voice sample");
     if (!session.cloneConsentAccepted) {
       throw new OnboardingRuleError(
         "Voice clone consent is required before uploading a voice sample.",
@@ -250,15 +295,17 @@ export class OnboardingService {
       return undefined;
     }
 
+    const effectiveStaffName = updated.review.staffProfile.staffName.trim() || updated.staffName;
     crmStore.ensureStaff({
       id: updated.staffId,
-      fullName: updated.staffName,
+      fullName: effectiveStaffName,
+      role: updated.review.staffProfile.role || undefined,
     });
 
     crmStore.recordVoiceConsent({
       staffId: updated.staffId,
       consent: updated.cloneConsentAccepted,
-      signedBy: updated.staffName,
+      signedBy: effectiveStaffName,
       capturedAt: updated.voiceSample?.capturedAt ?? new Date().toISOString(),
     });
 
@@ -283,8 +330,9 @@ export class OnboardingService {
       inviteCode: session.inviteCode,
       status: session.status,
       staffId: session.staffId,
-      staffName: session.staffName,
+      staffName: session.review.staffProfile.staffName.trim() || session.staffName,
       participantToken: session.participantToken,
+      expiresAt: session.expiresAt,
       consentAccepted: session.consentAccepted,
       cloneConsentAccepted: session.cloneConsentAccepted,
       coverageScore: session.analysis.coverageScore,

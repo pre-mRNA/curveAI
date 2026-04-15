@@ -48,3 +48,5 @@
 - Extended the API suite to cover the new onboarding happy path, consent rejection, finalize guardrails, multipart audio uploads, and contract validation against `packages/shared`.
 - Fixed a follow-up browser regression where recorded voice samples were being scored as five-second clips regardless of actual duration, and added a web test that exercises recording -> upload -> finalize progression.
 - Pulled the onboarding session/review envelope types into `packages/shared` and switched the web client to consume those shared contracts instead of redeclaring backend DTOs locally.
+- Fixed the next review round on onboarding state integrity: onboarding session tokens now expire, completed sessions reject further mutation, configured Microsoft callbacks require a real auth code, and review identity fields now persist instead of disappearing on save.
+- Added a persistent Cloudflare deployment note recommending `Pages + Workers` for the web surface while keeping the orchestration core portable for later Australian self-hosting.
