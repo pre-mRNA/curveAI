@@ -113,10 +113,10 @@ function DashboardAuthPanel({
             <input
               id="admin-token"
               className="text-input"
-              type="password"
+              type="text"
               value={tokenDraft}
               onChange={(event) => onTokenDraftChange(event.target.value)}
-              autoComplete="current-password"
+              autoComplete="off"
               spellCheck={false}
               placeholder="Paste token here"
             />
