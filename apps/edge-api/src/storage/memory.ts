@@ -5,10 +5,12 @@ import {
   type CalendarConnectionRecord,
   type CallbackTaskRecord,
   type CallRecord,
+  type CustomerProfile,
   type DashboardExperiment,
   type DashboardPayload,
   type InterviewTurn,
   type JobCardEnvelope,
+  type JobLocation,
   type JobPhoto,
   type JobRecord,
   type QuoteRecord,
@@ -119,6 +121,75 @@ function toDashboardStatus(status: JobRecord["status"]): DashboardPayload["jobs"
     return "completed";
   }
   return status;
+}
+
+function normalizePhoneNumber(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const plusPrefixed = trimmed.startsWith("+");
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) {
+    return undefined;
+  }
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+  if (plusPrefixed) {
+    return `+${digits}`;
+  }
+  if (/^0\d{9}$/.test(digits)) {
+    return `+61${digits.slice(1)}`;
+  }
+  if (/^61\d{9}$/.test(digits)) {
+    return `+${digits}`;
+  }
+  return digits.length >= 8 ? `+${digits}` : digits;
+}
+
+function normalizeEmail(value?: string): string | undefined {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed ? trimmed : undefined;
+}
+
+function chooseLatestJob(jobs: JobRecord[]): JobRecord | undefined {
+  return [...jobs].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+}
+
+function toCustomerSuburb(location?: JobLocation, address?: string): string | undefined {
+  return location?.label ?? location?.suburb ?? address;
+}
+
+function choosePreferredDisplayName(candidate?: string, existing?: string): string | undefined {
+  const nextValue = candidate?.trim();
+  const currentValue = existing?.trim();
+  if (!nextValue) {
+    return currentValue || undefined;
+  }
+  if (!currentValue) {
+    return nextValue;
+  }
+
+  const sameIgnoringCase = nextValue.localeCompare(currentValue, undefined, { sensitivity: "accent" }) === 0;
+  if (sameIgnoringCase) {
+    return nextValue.length >= currentValue.length ? nextValue : currentValue;
+  }
+
+  const nextWords = nextValue.split(/\s+/u).length;
+  const currentWords = currentValue.split(/\s+/u).length;
+  if (nextWords !== currentWords) {
+    return nextWords > currentWords ? nextValue : currentValue;
+  }
+
+  if (nextValue.length !== currentValue.length) {
+    return nextValue.length > currentValue.length ? nextValue : currentValue;
+  }
+
+  return currentValue;
 }
 
 export class InMemoryOnboardingRepository implements OnboardingRepository {
@@ -358,12 +429,85 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
       return undefined;
     }
     const staff = job.staffId ? this.staffRecords.get(job.staffId) : undefined;
+    const customerId =
+      job.callerId ??
+      [...this.jobs.values()].find(
+        (candidate) =>
+          candidate.callerId &&
+          ((job.callerPhone && normalizePhoneNumber(candidate.callerPhone) === normalizePhoneNumber(job.callerPhone)) ||
+            (job.callerEmail && normalizeEmail(candidate.callerEmail) === normalizeEmail(job.callerEmail))),
+      )?.callerId;
     return {
       job: clone(job),
       staff: staff ? toStaffSummary(staff) : undefined,
+      customer: customerId ? await this.getCustomerProfile(customerId) : undefined,
       quotes: job.quote ? [clone(job.quote)] : [],
       photos: clone(job.photos),
       calls: clone(job.calls),
+    };
+  }
+
+  async getCustomerProfile(customerId: string): Promise<CustomerProfile | undefined> {
+    const jobs = [...this.jobs.values()].filter((job) => job.callerId === customerId);
+    if (jobs.length === 0) {
+      return undefined;
+    }
+
+    const latestJob = chooseLatestJob(jobs);
+    const normalizedPhone = normalizePhoneNumber(latestJob?.callerPhone);
+    const normalizedEmail = normalizeEmail(latestJob?.callerEmail);
+    const relatedCalls = [...this.calls.values()].filter(
+      (call) =>
+        jobs.some((job) => job.id === call.jobId) ||
+        (normalizedPhone ? normalizePhoneNumber(call.callerPhone) === normalizedPhone : false),
+    );
+    const relatedUploads = [...this.uploadRequests.values()].filter(
+      (upload) =>
+        jobs.some((job) => job.id === upload.jobId) ||
+        (normalizedPhone ? normalizePhoneNumber(upload.callerPhone) === normalizedPhone : false),
+    );
+    const latestCall = [...relatedCalls].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const knownStaffIds = [...new Set(jobs.map((job) => job.staffId).filter((value): value is string => Boolean(value)))];
+    const photoIds = new Set(jobs.flatMap((job) => job.photos.map((photo) => photo.id)));
+    const displayName = jobs.reduce<string | undefined>(
+      (current, job) => choosePreferredDisplayName(job.callerName, current),
+      undefined,
+    );
+
+    return {
+      id: customerId,
+      displayName,
+      phoneNumber: latestJob?.callerPhone,
+      normalizedPhone,
+      email: latestJob?.callerEmail,
+      normalizedEmail,
+      address: latestJob?.address,
+      location: latestJob?.location ? clone(latestJob.location) : undefined,
+      latestSummary: latestJob?.summary ?? latestJob?.issue,
+      latestCallSummary: latestCall?.summary,
+      latestCallAt: latestCall?.updatedAt,
+      lastJobId: latestJob?.id,
+      firstSeenAt: [...jobs].sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0]?.createdAt ?? latestJob?.createdAt ?? new Date().toISOString(),
+      lastSeenAt: latestJob?.updatedAt ?? new Date().toISOString(),
+      lastContactAt: latestCall?.updatedAt ?? latestJob?.updatedAt ?? new Date().toISOString(),
+      totalJobs: jobs.length,
+      totalCalls: relatedCalls.length,
+      totalUploads: relatedUploads.length,
+      totalPhotos: photoIds.size,
+      knownStaffIds,
+      recentJobs: [...jobs]
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, 5)
+        .map((job) => ({
+          jobId: job.id,
+          staffId: job.staffId,
+          status: job.status,
+          summary: job.summary ?? job.issue,
+          suburb: toCustomerSuburb(job.location, job.address),
+          quotedPrice: job.quote?.amount,
+          photoCount: job.photos.length,
+          updatedAt: job.updatedAt,
+        })),
     };
   }
 
@@ -378,13 +522,36 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   async ensureJob(input: JobUpsertInput): Promise<JobRecord> {
     const now = new Date().toISOString();
     const existing = this.jobs.get(input.id);
+    const callerPhone = input.callerPhone ?? existing?.callerPhone;
+    const callerEmail = input.callerEmail ?? existing?.callerEmail;
+    const normalizedPhone = normalizePhoneNumber(callerPhone);
+    const normalizedEmail = normalizeEmail(callerEmail);
+    let callerId = input.callerId ?? existing?.callerId;
+
+    if (!callerId && (normalizedPhone || normalizedEmail)) {
+      for (const candidate of this.jobs.values()) {
+        if (
+          candidate.callerId &&
+          ((normalizedPhone && normalizePhoneNumber(candidate.callerPhone) === normalizedPhone) ||
+            (normalizedEmail && normalizeEmail(candidate.callerEmail) === normalizedEmail))
+        ) {
+          callerId = candidate.callerId;
+          break;
+        }
+      }
+    }
+
+    if (!callerId && (normalizedPhone || normalizedEmail || input.callerName || existing?.callerName)) {
+      callerId = globalThis.crypto.randomUUID();
+    }
+
     const record: JobRecord = {
       id: input.id,
       staffId: input.staffId ?? existing?.staffId,
-      callerId: input.callerId ?? existing?.callerId,
+      callerId,
       callerName: input.callerName ?? existing?.callerName,
-      callerPhone: input.callerPhone ?? existing?.callerPhone,
-      callerEmail: input.callerEmail ?? existing?.callerEmail,
+      callerPhone,
+      callerEmail,
       address: input.address ?? existing?.address,
       location: input.location ? clone(input.location) : existing?.location ? clone(existing.location) : undefined,
       issue: input.issue ?? existing?.issue,

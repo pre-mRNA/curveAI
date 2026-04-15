@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
+import { onboardingBrand, onboardingBrandStyle } from '../brand';
 import type {
   CalendarConnectResponse,
   OnboardingConsentPayload,
@@ -188,6 +189,22 @@ export default function OnboardingPage() {
     typeof navigator.mediaDevices.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined';
 
+  async function hydrateInterviewQuestion(nextSession: OnboardingSession) {
+    const nextStep = safeStep(nextSession.currentStep);
+    if (nextStep !== 'interview' || nextSession.currentQuestion) {
+      return nextSession.currentQuestion || '';
+    }
+
+    try {
+      const nextQuestionResponse = await apiClient.requestOnboardingNextQuestion(nextSession.id);
+      setCurrentQuestion(nextQuestionResponse.question);
+      return nextQuestionResponse.question;
+    } catch (error) {
+      setAnswerError(error instanceof Error ? error.message : 'Unable to load the first interview question.');
+      return '';
+    }
+  }
+
   async function refreshSession(nextSessionId = session?.id, options?: { syncStep?: boolean }) {
     if (!nextSessionId) {
       return null;
@@ -195,9 +212,12 @@ export default function OnboardingPage() {
 
     const nextSession = await apiClient.getOnboardingSession(nextSessionId);
     setSession(nextSession);
-    setCurrentQuestion(nextSession.currentQuestion || '');
     if (options?.syncStep !== false) {
       setCurrentStep(safeStep(nextSession.currentStep));
+    }
+    setCurrentQuestion(nextSession.currentQuestion || '');
+    if (!nextSession.currentQuestion) {
+      await hydrateInterviewQuestion(nextSession);
     }
     return nextSession;
   }
@@ -259,9 +279,12 @@ export default function OnboardingPage() {
         }
 
         setSession(nextSession);
-        setCurrentQuestion(nextSession.currentQuestion || '');
         setCurrentStep(safeStep(nextSession.currentStep));
         setBootstrapError(null);
+        setCurrentQuestion(nextSession.currentQuestion || '');
+        if (!nextSession.currentQuestion) {
+          await hydrateInterviewQuestion(nextSession);
+        }
         void refreshReview(nextSession.id);
       } catch (error) {
         if (!alive) {
@@ -320,13 +343,16 @@ export default function OnboardingPage() {
       const nextSession = startResponse.session;
 
       setSession(nextSession);
-      setCurrentQuestion(nextSession.currentQuestion || '');
       setCurrentStep(nextSession.currentStep || 'interview');
       setReview(null);
       setReviewDraft(createEmptyReviewDraft());
       setCalendarLink('');
       setCalendarMessage(null);
       setFinalizeResult(null);
+      setCurrentQuestion(nextSession.currentQuestion || '');
+      if (!nextSession.currentQuestion) {
+        await hydrateInterviewQuestion(nextSession);
+      }
     } catch (error) {
       setBootstrapError(error instanceof Error ? error.message : 'Unable to start onboarding session.');
     } finally {
@@ -603,11 +629,11 @@ export default function OnboardingPage() {
 
   if (bootstrapLoading) {
     return (
-      <div className="shell onboarding-shell">
+      <div className="shell onboarding-shell" style={onboardingBrandStyle}>
         <div className="container">
           <div className="card">
             <div className="card-inner">
-              <div className="eyebrow">Invite onboarding</div>
+              <div className="eyebrow">{onboardingBrand.eyebrow}</div>
               <h1>Preparing your secure onboarding session.</h1>
               <p className="muted">Checking the invite and preparing the next secure onboarding step.</p>
             </div>
@@ -619,11 +645,11 @@ export default function OnboardingPage() {
 
   if (bootstrapError && !session) {
     return (
-      <div className="shell onboarding-shell">
+      <div className="shell onboarding-shell" style={onboardingBrandStyle}>
         <div className="container">
           <div className="hero onboarding-hero">
-            <div className="eyebrow">Invite onboarding</div>
-            <h1>Secure staff onboarding for the browser.</h1>
+            <div className="eyebrow">{onboardingBrand.eyebrow}</div>
+            <h1>Secure Curve AI setup for the browser.</h1>
             <p>
               The invite link could not be opened. This page only works with a valid invite code and an active
               onboarding session.
@@ -643,10 +669,10 @@ export default function OnboardingPage() {
 
   if (currentStep === 'complete') {
     return (
-      <div className="shell onboarding-shell">
+      <div className="shell onboarding-shell" style={onboardingBrandStyle}>
         <div className="container onboarding-layout">
           <div className="hero onboarding-hero">
-            <div className="eyebrow">Invite onboarding</div>
+            <div className="eyebrow">{onboardingBrand.eyebrow}</div>
             <h1>Onboarding complete.</h1>
             <p>The staff profile is ready to hand over to the ops console and downstream routing.</p>
           </div>
@@ -670,11 +696,11 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="shell onboarding-shell">
+    <div className="shell onboarding-shell" style={onboardingBrandStyle}>
       <div className="container onboarding-layout">
         <header className="hero onboarding-hero">
-          <div className="eyebrow">Invite onboarding</div>
-          <h1>Structured voice onboarding for tradies.</h1>
+          <div className="eyebrow">{onboardingBrand.eyebrow}</div>
+          <h1>Structured Curve AI setup for tradies.</h1>
           <p>
             Invite code <code>{inviteCode}</code> opens a secure session for consent, interview, extraction review,
             Microsoft calendar connect, voice sample capture, and finalization. Keep this tab open while onboarding;

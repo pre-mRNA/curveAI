@@ -271,6 +271,41 @@ export interface CallRecord {
   updatedAt: string;
 }
 
+export interface CustomerJobSnapshot {
+  jobId: string;
+  staffId?: string;
+  status: JobStatus;
+  summary?: string;
+  suburb?: string;
+  quotedPrice?: number;
+  photoCount: number;
+  updatedAt: string;
+}
+
+export interface CustomerProfile {
+  id: string;
+  displayName?: string;
+  phoneNumber?: string;
+  normalizedPhone?: string;
+  email?: string;
+  normalizedEmail?: string;
+  address?: string;
+  location?: JobLocation;
+  latestSummary?: string;
+  latestCallSummary?: string;
+  latestCallAt?: string;
+  lastJobId?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastContactAt: string;
+  totalJobs: number;
+  totalCalls: number;
+  totalUploads: number;
+  totalPhotos: number;
+  knownStaffIds: string[];
+  recentJobs: CustomerJobSnapshot[];
+}
+
 export interface JobRecord {
   id: string;
   staffId?: string;
@@ -295,6 +330,7 @@ export interface JobRecord {
 export interface JobCardEnvelope {
   job: JobRecord;
   staff?: StaffProfileSummary;
+  customer?: CustomerProfile;
   quotes: QuoteRecord[];
   photos: JobPhoto[];
   calls: CallRecord[];

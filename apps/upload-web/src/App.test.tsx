@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -30,6 +30,10 @@ function byTextContent(expected: string) {
 describe('upload app', () => {
   const fetchMock = vi.fn();
 
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -38,7 +42,7 @@ describe('upload app', () => {
     renderRoute('/');
 
     expect(screen.getByRole('heading', { name: /send your job photos to the tradie/i })).toBeInTheDocument();
-    expect(screen.getByText(/tokenized upload path/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /use your secure upload link from the sms/i })).toBeInTheDocument();
   });
 
   it('advertises the backend image-only upload contract', async () => {
@@ -56,7 +60,7 @@ describe('upload app', () => {
 
     renderRoute('/upload/job_123');
 
-    const fileInput = screen.getByLabelText(/photo files/i);
+    const fileInput = await screen.findByLabelText(/photo files/i);
     expect(await screen.findByText(byTextContent('0 already uploaded'))).toBeInTheDocument();
     expect(fileInput).toHaveAttribute('accept', PHOTO_UPLOAD_ACCEPT);
     expect(fileInput.getAttribute('accept') ?? '').not.toContain('.pdf');
@@ -82,7 +86,7 @@ describe('upload app', () => {
     expect(await screen.findByText(byTextContent('0 already uploaded'))).toBeInTheDocument();
 
     const file = new File(['image'], 'photo.jpg', { type: 'image/jpeg' });
-    await user.upload(screen.getByLabelText(/photo files/i), file);
+    await user.upload(await screen.findByLabelText(/photo files/i), file);
     await user.click(screen.getByRole('button', { name: /upload 1 photo/i }));
 
     await waitFor(() => {
@@ -122,7 +126,7 @@ describe('upload app', () => {
     await screen.findByText(byTextContent('0 already uploaded'));
 
     const file = new File(['image'], 'site-photo.jpg', { type: 'image/jpeg' });
-    await user.upload(screen.getByLabelText(/photo files/i), file);
+    await user.upload(await screen.findByLabelText(/photo files/i), file);
 
     expect(screen.getByText(/site-photo\.jpg/i)).toBeInTheDocument();
 

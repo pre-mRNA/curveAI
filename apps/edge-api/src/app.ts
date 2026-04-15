@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z, type ZodTypeAny } from "zod";
 import { AiTestStudioRuleError, AiTestStudioService, type AiTestStudioProviders } from "./ai-test-studio-service.js";
 import { getConfig, type EdgeApiEnv } from "./env.js";
+import { classifyRouteFamily, summarizeError, summarizeOrigin, writeLog } from "./logger.js";
 import { OnboardingRuleError, OnboardingService, type ServiceProviders } from "./onboarding-service.js";
 import { MockMicrosoftCalendarAdapter } from "./providers/calendar.js";
 import {
@@ -59,19 +60,6 @@ const ONBOARDING_SESSION_COOKIE = "curve_onboarding_session";
 const defaultMemoryRepo = new InMemoryOnboardingRepository();
 const defaultMemoryObjectStore = new InMemoryObjectStore();
 type OnboardingSessionResult = { session: OnboardingSessionRecord } | { error: Response };
-
-function jsonError(c: any, status: number, message: string, details?: Record<string, unknown>) {
-  return c.json(
-    {
-      ok: false,
-      error: {
-        message,
-        ...(details ? { details } : {}),
-      },
-    },
-    { status },
-  );
-}
 
 function parseCookies(request: Request): Record<string, string> {
   const cookieHeader = request.headers.get("cookie");
@@ -251,6 +239,22 @@ function isLocalRequest(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function requestAuthKind(request: Request): string {
+  if (getAdminAccessToken(request)) {
+    return "admin";
+  }
+  if (getStaffAccessToken(request)) {
+    return "staff";
+  }
+  if (getOnboardingAccessToken(request)) {
+    return "onboarding";
+  }
+  if (request.headers.get("x-curve-signature") || request.headers.get("x-curve-timestamp")) {
+    return "automation";
+  }
+  return "anonymous";
 }
 
 type SupportedPhotoMimeType = "image/jpeg" | "image/png" | "image/webp" | "image/heic" | "image/heif";
@@ -545,6 +549,55 @@ export function createApp(options?: {
   });
 
   const app = new Hono<AppBindings>();
+
+  function hasAdminAccess(request: Request): boolean {
+    const token = getAdminAccessToken(request);
+    return Boolean(token && config.adminToken && constantTimeEqual(token, config.adminToken));
+  }
+
+  function getRequestId(c: any): string | undefined {
+    return (c as any).get("requestId") as string | undefined;
+  }
+
+  function getRequestStartedAt(c: any): number | undefined {
+    return (c as any).get("requestStartedAt") as number | undefined;
+  }
+
+  function hasHandledError(c: any): boolean {
+    return Boolean((c as any).get("requestHandledError"));
+  }
+
+  function attachResponseSafetyHeaders(response: Response, requestId: string | undefined) {
+    if (requestId) {
+      response.headers.set("x-request-id", requestId);
+    }
+    response.headers.set("x-content-type-options", "nosniff");
+  }
+
+  function jsonError(c: any, status: number, message: string, details?: Record<string, unknown>) {
+    const requestId = getRequestId(c);
+    const exposeDetails =
+      Boolean(details) &&
+      ((details && Array.isArray((details as { issues?: unknown[] }).issues)) ||
+        isLocalRequest(c.req.url) ||
+        hasAdminAccess(c.req.raw));
+
+    const response = c.json(
+      {
+        ok: false,
+        error: {
+          message,
+          ...(requestId ? { requestId } : {}),
+          ...(exposeDetails && details ? { details } : {}),
+        },
+      },
+      { status },
+    );
+    attachResponseSafetyHeaders(response, requestId);
+    response.headers.set("cache-control", "no-store");
+    return response;
+  }
+
   const opsOrigins = [config.publicOpsAppUrl].filter(Boolean);
   const staffOrigins = [config.publicStaffAppUrl, config.publicOpsAppUrl].filter(
     (value): value is string => Boolean(value),
@@ -563,6 +616,38 @@ export function createApp(options?: {
     credentials: true,
   }));
 
+  app.use("*", async (c, next) => {
+    const requestId = createId("req");
+    const startedAt = Date.now();
+    (c as any).set("requestId", requestId);
+    (c as any).set("requestStartedAt", startedAt);
+
+    await next();
+
+    if (hasHandledError(c)) {
+      return;
+    }
+
+    attachResponseSafetyHeaders(c.res, requestId);
+
+    const status = c.res.status || 200;
+    if (c.req.method === "OPTIONS" || (c.req.path === "/health" && status < 400)) {
+      return;
+    }
+
+    const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
+    writeLog(level, "request.completed", {
+      requestId,
+      method: c.req.method,
+      path: c.req.path,
+      routeFamily: classifyRouteFamily(c.req.path),
+      status,
+      durationMs: Date.now() - startedAt,
+      origin: summarizeOrigin(requestOrigin(c.req.raw)),
+      authKind: requestAuthKind(c.req.raw),
+    });
+  });
+
   const requireBrowserOrigin =
     (allowedOrigins: string[], message = "Request origin is not allowed for this route") =>
     async (c: any, next: () => Promise<void>) => {
@@ -577,6 +662,8 @@ export function createApp(options?: {
   app.use("/staff/*", requireBrowserOrigin(staffOrigins));
   app.use("/jobs", requireBrowserOrigin(staffOrigins));
   app.use("/jobs/*", requireBrowserOrigin(staffOrigins));
+  app.use("/customers", requireBrowserOrigin(staffOrigins));
+  app.use("/customers/*", requireBrowserOrigin(staffOrigins));
   app.use("/assets/*", requireBrowserOrigin(staffOrigins));
   app.use("/onboarding/*", requireBrowserOrigin(onboardingOrigins));
   app.use("/uploads/*", requireBrowserOrigin(uploadOrigins));
@@ -602,6 +689,24 @@ export function createApp(options?: {
   });
 
   app.onError((error, c) => {
+    (c as any).set("requestHandledError", true);
+    const requestId = getRequestId(c);
+    const startedAt = getRequestStartedAt(c);
+    const status =
+      error instanceof OnboardingRuleError || error instanceof AiTestStudioRuleError ? error.statusCode : 500;
+
+    writeLog(status >= 500 ? "error" : "warn", "request.failed", {
+      requestId,
+      method: c.req.method,
+      path: c.req.path,
+      routeFamily: classifyRouteFamily(c.req.path),
+      status,
+      durationMs: typeof startedAt === "number" ? Date.now() - startedAt : undefined,
+      origin: summarizeOrigin(requestOrigin(c.req.raw)),
+      authKind: requestAuthKind(c.req.raw),
+      error: summarizeError(error),
+    });
+
     if (error instanceof OnboardingRuleError) {
       return jsonError(c, error.statusCode, error.message);
     }
@@ -618,11 +723,6 @@ export function createApp(options?: {
         : "Unexpected error",
     );
   });
-
-  function hasAdminAccess(request: Request): boolean {
-    const token = getAdminAccessToken(request);
-    return Boolean(token && config.adminToken && constantTimeEqual(token, config.adminToken));
-  }
 
   async function requireAdmin(c: any) {
     const token = getAdminAccessToken(c.req.raw);
@@ -925,6 +1025,28 @@ export function createApp(options?: {
     return c.json({
       ok: true,
       card: signedCard,
+    });
+  });
+
+  app.get("/customers/:customerId", async (c) => {
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
+    }
+    const customerId = c.req.param("customerId");
+    if (!customerId) {
+      return jsonError(c, 400, "customerId is required");
+    }
+    const customer = await repo.getCustomerProfile(customerId);
+    if (!customer) {
+      return jsonError(c, 404, "Customer not found", { customerId });
+    }
+    if (actor.kind !== "admin" && !customer.knownStaffIds.includes(actor.staffId)) {
+      return jsonError(c, 403, "You do not have access to that customer");
+    }
+    return c.json({
+      ok: true,
+      customer,
     });
   });
 
@@ -1611,6 +1733,9 @@ export function createApp(options?: {
       const card = await repo.getJobCard(job.id);
       if (card) {
         response.card = await signJobCardEnvelope(card);
+      }
+      if (job.callerId) {
+        response.customer = await repo.getCustomerProfile(job.callerId);
       }
     }
     return c.json(response);

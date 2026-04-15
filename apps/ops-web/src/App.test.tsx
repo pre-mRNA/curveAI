@@ -247,7 +247,7 @@ describe('ops console', () => {
     const user = userEvent.setup();
     renderRoute('/test-studio');
 
-    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.type(await screen.findByLabelText(/admin token/i), 'studio-token');
     await user.click(screen.getByRole('button', { name: /load console/i }));
 
     expect(await screen.findByRole('heading', { name: /current test cases/i })).toBeInTheDocument();
@@ -261,7 +261,7 @@ describe('ops console', () => {
 
     renderRoute('/test-studio');
 
-    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.type(await screen.findByLabelText(/admin token/i), 'studio-token');
     await user.click(screen.getByRole('button', { name: /load console/i }));
 
     expect(await screen.findByText(/unable to load the worker-backed test studio/i)).toBeInTheDocument();
@@ -305,7 +305,7 @@ describe('ops console', () => {
     const user = userEvent.setup();
     renderRoute('/test-studio');
 
-    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.type(await screen.findByLabelText(/admin token/i), 'studio-token');
     await user.click(screen.getByRole('button', { name: /load console/i }));
 
     expect(await screen.findByRole('heading', { name: /current test cases/i })).toBeInTheDocument();
@@ -343,7 +343,7 @@ describe('ops console', () => {
     const user = userEvent.setup();
     renderRoute('/test-studio');
 
-    await user.type(screen.getByLabelText(/admin token/i), 'studio-token');
+    await user.type(await screen.findByLabelText(/admin token/i), 'studio-token');
     await user.click(screen.getByRole('button', { name: /load console/i }));
 
     expect(await screen.findByRole('heading', { name: /recent runs/i })).toBeInTheDocument();

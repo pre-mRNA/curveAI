@@ -117,9 +117,11 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
 describe('onboarding route', () => {
   const fetchMock = vi.fn();
   let savedReviewPayload: Record<string, unknown> | null = null;
+  let startSessionFixture: ReturnType<typeof backendSession>;
 
   beforeEach(() => {
     savedReviewPayload = null;
+    startSessionFixture = backendSession();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -133,7 +135,7 @@ describe('onboarding route', () => {
 
       if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
         return jsonResponse({
-          session: backendSession(),
+          session: startSessionFixture,
         });
       }
 
@@ -242,7 +244,7 @@ describe('onboarding route', () => {
 
     renderRoute('/onboard/invite-123');
 
-    expect(await screen.findByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /structured curve ai setup for tradies/i })).toBeInTheDocument();
     expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
 
     await user.click(screen.getByLabelText(/i consent to recording/i));
@@ -307,6 +309,31 @@ describe('onboarding route', () => {
       );
     });
   }, 10000);
+
+  it('requests the first interview question when the started session does not include one', async () => {
+    startSessionFixture = backendSession({
+      nextQuestion: undefined,
+    });
+    const user = userEvent.setup();
+
+    renderRoute('/onboard/invite-123');
+
+    expect(await screen.findByRole('heading', { name: /structured curve ai setup for tradies/i })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/i consent to recording/i));
+    await user.click(screen.getByLabelText(/i consent to using a clean voice sample/i));
+    await user.click(screen.getByLabelText(/i consent to using my onboarding responses/i));
+    await user.click(screen.getByRole('button', { name: /begin interview/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/next-question$/),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    expect(await screen.findByText(/do you prefer fixed price or callout pricing/i)).toBeInTheDocument();
+  });
 
   it('uploads a recorded voice sample with the real elapsed duration', async () => {
     const user = userEvent.setup();

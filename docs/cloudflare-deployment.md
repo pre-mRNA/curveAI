@@ -105,6 +105,13 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.
 - The repo now includes `wrangler.jsonc` files for each Pages app plus `npm run deploy:pages:onboarding`, `deploy:pages:ops`, `deploy:pages:staff`, `deploy:pages:upload`, and `deploy:cloudflare:staging`.
 
+## Frontend Performance Defaults
+
+- Each Pages app now ships a `_headers` file that keeps HTML on `must-revalidate` while serving hashed `/assets/*` files with `Cache-Control: public, max-age=31536000, immutable`.
+- The Vite builds now split route and vendor code instead of shipping one large entry bundle per app. The heavy onboarding, upload, and AI studio routes load on demand.
+- Each app primes the Worker API origin with `dns-prefetch` and `preconnect` hints so the first authenticated or data-fetching request pays less connection setup cost.
+- The onboarding, upload, and ops routes also trigger small idle-time chunk prefetches for the next likely screen rather than front-loading that cost into the landing route.
+
 ## Notes
 
 - Static Pages alone is not enough for this product.

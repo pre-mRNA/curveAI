@@ -151,10 +151,14 @@ test("worker onboarding flow reaches finalized state", async () => {
   const onboardingCookie = startResponse.headers.get("set-cookie");
   assert.match(onboardingCookie ?? "", /curve_onboarding_session=/);
   const startBody = (await startResponse.json()) as {
-    session: { id: string };
+    session: { id: string; nextQuestion?: { question?: string } | null };
   };
   const sessionId = startBody.session.id;
   assert.equal("participantToken" in startBody.session, false);
+  assert.equal(
+    startBody.session.nextQuestion?.question,
+    "What kinds of jobs do you want the agent to talk about and qualify?",
+  );
 
   const duplicateStartResponse = await app.request("/onboarding/sessions/start", {
     method: "POST",
@@ -175,6 +179,21 @@ test("worker onboarding flow reaches finalized state", async () => {
     },
   });
   assert.equal(resumedResponse.status, 200);
+
+  const nextQuestionResponse = await app.request(`/onboarding/sessions/${sessionId}/next-question`, {
+    method: "POST",
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
+  });
+  assert.equal(nextQuestionResponse.status, 200);
+  const nextQuestionBody = (await nextQuestionResponse.json()) as {
+    nextQuestion?: { question?: string } | null;
+  };
+  assert.equal(
+    nextQuestionBody.nextQuestion?.question,
+    "What kinds of jobs do you want the agent to talk about and qualify?",
+  );
 
   const turnResponse = await app.request(`/onboarding/sessions/${sessionId}/turns`, {
     method: "POST",
@@ -288,6 +307,7 @@ test("health reports worker runtime and provider modes", async () => {
 
   const response = await app.request("/health");
   assert.equal(response.status, 200);
+  assert.match(response.headers.get("x-request-id") ?? "", /^req_/);
   const body = (await response.json()) as {
     ok: boolean;
     ready: boolean;
@@ -319,6 +339,38 @@ test("public health omits provider modes and warning details", async () => {
   assert.equal("reasoning" in body, false);
   assert.equal("calendar" in body, false);
   assert.equal("warnings" in body, false);
+});
+
+test("worker responses include a request id and emit structured completion logs", async () => {
+  const app = createTestApp();
+  const originalInfo = console.info;
+  const lines: string[] = [];
+  console.info = (message?: unknown) => {
+    lines.push(String(message));
+  };
+
+  try {
+    const response = await app.request("/dashboard", {
+      headers: {
+        Authorization: "Bearer admin-secret",
+      },
+    });
+
+    assert.equal(response.status, 200);
+    const requestId = response.headers.get("x-request-id") ?? "";
+    assert.match(requestId, /^req_/);
+
+    const completionLog = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === "request.completed" && entry.path === "/dashboard");
+    assert.ok(completionLog);
+    assert.equal(completionLog?.requestId, requestId);
+    assert.equal(completionLog?.status, 200);
+    assert.equal(completionLog?.routeFamily, "ops");
+    assert.equal(completionLog?.authKind, "admin");
+  } finally {
+    console.info = originalInfo;
+  }
 });
 
 test("non-local requests fail fast when worker config is incomplete", async () => {
@@ -366,6 +418,23 @@ test("public non-local requests do not receive detailed config warnings", async 
     };
   };
   assert.equal(body.error.details, undefined);
+});
+
+test("public upload errors stay correlation-friendly without leaking token details", async () => {
+  const app = createTestApp();
+
+  const response = await app.request("https://curve-ai-api-staging.workers.dev/uploads/upload_secret_token");
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get("x-request-id") ?? "", /^req_/);
+
+  const body = (await response.json()) as {
+    error: {
+      requestId?: string;
+      details?: Record<string, unknown>;
+    };
+  };
+  assert.equal(body.error.details, undefined);
+  assert.equal(body.error.requestId, response.headers.get("x-request-id") ?? undefined);
 });
 
 test("worker blocks realtime session issuance without both consents", async () => {
@@ -509,6 +578,157 @@ test("customer upload flow stays on Cloudflare routes and produces protected pho
   assert.equal(photoResponse.status, 200);
   assert.equal(photoResponse.headers.get("content-type"), "image/jpeg");
   assert.equal(photoResponse.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("customer profiles link repeat callers across jobs, calls, and uploads", async () => {
+  const app = createTestApp();
+  const staff = await createStaffSession(app, {
+    fullName: "Jordan Tradie",
+    email: "jordan@example.com",
+    phoneNumber: "+61422222222",
+    role: "Owner",
+    timezone: "Australia/Sydney",
+  });
+
+  const firstContextBody = {
+    staffId: staff.staffId,
+    callerPhone: "0400 000 111",
+    callerName: "Mia",
+    address: "14 Clarence Street",
+    suburb: "Marrickville",
+    issue: "Blocked stormwater drain",
+  };
+  const firstContextResponse = await app.request("/voice/context", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/context", firstContextBody),
+    body: JSON.stringify(firstContextBody),
+  });
+  assert.equal(firstContextResponse.status, 200);
+  const firstContext = (await firstContextResponse.json()) as {
+    job: { id: string; callerId?: string };
+    customer?: { id: string; totalJobs: number };
+  };
+  assert.ok(firstContext.job.id);
+  assert.ok(firstContext.customer?.id);
+  assert.equal(firstContext.customer?.totalJobs, 1);
+
+  const secondContextBody = {
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    callerName: "Mia T",
+    address: "14 Clarence Street",
+    suburb: "Marrickville",
+    issue: "Leaking hot water unit",
+  };
+  const secondContextResponse = await app.request("/voice/context", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/context", secondContextBody),
+    body: JSON.stringify(secondContextBody),
+  });
+  assert.equal(secondContextResponse.status, 200);
+  const secondContext = (await secondContextResponse.json()) as {
+    job: { id: string };
+    customer?: { id: string; totalJobs: number };
+  };
+  assert.equal(secondContext.customer?.id, firstContext.customer?.id);
+  assert.equal(secondContext.customer?.totalJobs, 2);
+
+  const postCallBody = {
+    callId: "call_customer_history",
+    jobId: secondContext.job.id,
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    summary: "Caller wants a same-day inspection after sending photos.",
+    status: "completed" as const,
+    direction: "inbound" as const,
+  };
+  const postCallResponse = await app.request("/voice/post-call", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/post-call", postCallBody),
+    body: JSON.stringify(postCallBody),
+  });
+  assert.equal(postCallResponse.status, 201);
+
+  const photoLinkBody = {
+    jobId: firstContext.job.id,
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    notes: "Send wider shots of the drain and close-ups of the outlet.",
+  };
+  const photoLinkResponse = await app.request("/voice/tools/send-photo-link", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/tools/send-photo-link", photoLinkBody),
+    body: JSON.stringify(photoLinkBody),
+  });
+  assert.equal(photoLinkResponse.status, 200);
+  const photoLink = (await photoLinkResponse.json()) as {
+    uploadRequest: { token: string };
+  };
+
+  const uploadForm = new FormData();
+  uploadForm.append(
+    "photos",
+    new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])], "drain.jpg", {
+      type: "image/jpeg",
+    }),
+  );
+  const uploadResponse = await app.request(`/uploads/${photoLink.uploadRequest.token}/photos`, {
+    method: "POST",
+    body: uploadForm,
+  });
+  assert.equal(uploadResponse.status, 200);
+
+  const firstCardResponse = await app.request(`/jobs/${firstContext.job.id}/card`, {
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(firstCardResponse.status, 200);
+  const firstCard = (await firstCardResponse.json()) as {
+    card: {
+      customer?: {
+        id: string;
+        displayName?: string;
+        totalJobs: number;
+        totalCalls: number;
+        totalUploads: number;
+        totalPhotos: number;
+        knownStaffIds: string[];
+        recentJobs: Array<{ jobId: string }>;
+      };
+    };
+  };
+  assert.equal(firstCard.card.customer?.id, firstContext.customer?.id);
+  assert.equal(firstCard.card.customer?.displayName, "Mia T");
+  assert.equal(firstCard.card.customer?.totalJobs, 2);
+  assert.equal(firstCard.card.customer?.totalCalls, 1);
+  assert.equal(firstCard.card.customer?.totalUploads, 1);
+  assert.equal(firstCard.card.customer?.totalPhotos, 1);
+  assert.deepEqual(firstCard.card.customer?.knownStaffIds, [staff.staffId]);
+  assert.equal(firstCard.card.customer?.recentJobs.length, 2);
+
+  const customerResponse = await app.request(`/customers/${firstContext.customer?.id}`, {
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(customerResponse.status, 200);
+  const customerBody = (await customerResponse.json()) as {
+    customer: {
+      id: string;
+      totalJobs: number;
+      totalCalls: number;
+      totalUploads: number;
+      totalPhotos: number;
+      recentJobs: Array<{ jobId: string }>;
+    };
+  };
+  assert.equal(customerBody.customer.id, firstContext.customer?.id);
+  assert.equal(customerBody.customer.totalJobs, 2);
+  assert.equal(customerBody.customer.totalCalls, 1);
+  assert.equal(customerBody.customer.totalUploads, 1);
+  assert.equal(customerBody.customer.totalPhotos, 1);
+  assert.equal(customerBody.customer.recentJobs.length, 2);
 });
 
 test("protected photo assets only load for the assigned staff session or admin", async () => {

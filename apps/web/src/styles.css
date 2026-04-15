@@ -1,15 +1,22 @@
 :root {
   color-scheme: light;
+  --bg-top: #f9f5ef;
+  --bg-bottom: #f1ebe2;
+  --glow-left: rgba(31, 103, 127, 0.15);
+  --glow-right: rgba(201, 101, 66, 0.14);
   --bg: #f3eee6;
   --panel: rgba(255, 255, 255, 0.86);
   --panel-solid: #ffffff;
   --text: #18212a;
   --muted: #5a6672;
   --accent: #1f677f;
+  --accent-strong: #144f62;
   --accent-2: #c96542;
   --accent-soft: rgba(31, 103, 127, 0.12);
   --line: rgba(24, 33, 42, 0.1);
   --shadow: 0 18px 50px rgba(24, 33, 42, 0.12);
+  --font-sans: 'Avenir Next', 'Manrope', 'Segoe UI', sans-serif;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
 
 * {
@@ -24,11 +31,8 @@ body,
 }
 
 body {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(31, 103, 127, 0.15), transparent 28%),
-    radial-gradient(circle at top right, rgba(201, 101, 66, 0.14), transparent 24%),
-    linear-gradient(180deg, #f9f5ef 0%, #f1ebe2 100%);
+  font-family: var(--font-sans);
+  background: var(--bg-top);
   color: var(--text);
   line-height: 1.5;
 }
@@ -91,6 +95,10 @@ input[type='checkbox'] {
 .shell {
   min-height: 100vh;
   padding: clamp(16px, 2vw, 28px);
+  background:
+    radial-gradient(circle at top left, var(--glow-left), transparent 28%),
+    radial-gradient(circle at top right, var(--glow-right), transparent 24%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
 }
 
 .container {
@@ -108,13 +116,16 @@ input[type='checkbox'] {
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-size: 0.74rem;
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
 .hero h1 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: clamp(2rem, 4vw, 3.5rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
   line-height: 0.98;
 }
 
@@ -672,6 +683,11 @@ input[type='checkbox'] {
   color: var(--muted);
   display: grid;
   gap: 8px;
+}
+
+.guide-list.compact {
+  gap: 6px;
+  font-size: 0.95rem;
 }
 
 .skeleton {

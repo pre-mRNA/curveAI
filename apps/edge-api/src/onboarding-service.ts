@@ -111,6 +111,7 @@ export class OnboardingService {
       );
     }
     if (!session || isExpired(session.expiresAt) || session.status === "completed") {
+      const starterPrompt = onboardingChecklist[0];
       session = {
         id: createId("sess"),
         inviteId: invite.id,
@@ -124,7 +125,19 @@ export class OnboardingService {
         cloneConsentAccepted: false,
         createdAt: now,
         updatedAt: now,
-        analysis: createDefaultAnalysis(),
+        analysis: {
+          ...createDefaultAnalysis(),
+          recommendedQuestions: starterPrompt
+            ? [
+                {
+                  id: starterPrompt.id,
+                  section: starterPrompt.section,
+                  reason: "Start by establishing the core work types the agent should qualify.",
+                  question: starterPrompt.prompt,
+                },
+              ]
+            : [],
+        },
         review: normalizeReview(undefined, invite.fullName, invite.role),
       };
       invite.sessionId = session.id;

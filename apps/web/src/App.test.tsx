@@ -45,15 +45,15 @@ describe('onboarding app routing', () => {
   it('shows the onboarding landing page at the root route', () => {
     renderRoute('/');
 
-    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/invite-gated/i)).not.toHaveLength(0);
+    expect(screen.getByRole('heading', { name: /get your voice agent ready in one guided session/i })).toBeInTheDocument();
+    expect(screen.getByText(/about 10 minutes/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open onboarding/i })).toBeInTheDocument();
   });
 
   it('keeps the invite route available for the onboarding flow', async () => {
     renderRoute('/onboard/invite-123');
 
-    expect(await screen.findByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /structured curve ai setup for tradies/i })).toBeInTheDocument();
     expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /begin interview/i })).toBeInTheDocument();
   });

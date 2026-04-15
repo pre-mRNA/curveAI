@@ -5,6 +5,7 @@ import type {
   CalendarConnectionRecord,
   CallbackTaskRecord,
   CallRecord,
+  CustomerProfile,
   DashboardPayload,
   DashboardExperiment,
   InterviewTurn,
@@ -139,6 +140,7 @@ export interface OnboardingRepository {
   saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord>;
   listJobs(staffId?: string): Promise<JobRecord[]>;
   getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;
+  getCustomerProfile(customerId: string): Promise<CustomerProfile | undefined>;
   listCallbacks(staffId?: string): Promise<CallbackTaskRecord[]>;
   listExperiments(): Promise<DashboardExperiment[]>;
   ensureJob(input: JobUpsertInput): Promise<JobRecord>;

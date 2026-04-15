@@ -10,6 +10,7 @@ import {
   saveVoiceConsent,
   verifyStaffOtp,
 } from './api/client';
+import { staffBrand, staffBrandStyle } from './brand';
 import { ProtectedImage } from './ProtectedImage';
 import { testScenarios } from './testStudio';
 import type { JobCard, JobSummary, PricingProfile, StaffProfile } from './types';
@@ -258,20 +259,17 @@ function AppShell({
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
 
   return (
-    <div className="shell">
+    <div className="shell" style={staffBrandStyle}>
       <div className="container">
         <header className="hero hero--staff">
           <div className="hero-copy">
-            <div className="eyebrow">Staff Console</div>
-            <h1>Queue, setup, and test flows from a phone-sized Cloudflare surface.</h1>
-            <p>
-              This Pages app replaces the iOS pilot for now. It keeps auth, setup completion, live jobs, and a test
-              scenario deck in one surface.
-            </p>
+            <div className="eyebrow">{staffBrand.eyebrow}</div>
+            <h1>{staffBrand.heroTitle}</h1>
+            <p>{staffBrand.heroDescription}</p>
           </div>
 
           <div className="hero-card">
-            <span className="pill accent">Signed in</span>
+            <span className="pill accent">{staffBrand.badgeLabel}</span>
             <strong>{profile.fullName}</strong>
             <p className="muted">
               {profile.role ?? 'Staff'}{profile.companyName ? ` · ${profile.companyName}` : ''}{' '}
@@ -823,21 +821,18 @@ function AuthScreen({
   }
 
   return (
-    <div className="shell auth-shell">
+    <div className="shell auth-shell" style={staffBrandStyle}>
       <div className="container auth-container">
         <header className="hero hero--auth">
           <div className="hero-copy">
-            <div className="eyebrow">Staff Access</div>
+            <div className="eyebrow">{staffBrand.eyebrow}</div>
             <h1>Phone-first staff access while the native app waits.</h1>
-            <p>
-              Use the invite token and OTP from ops to open the staff queue, finish setup, and inspect live job cards
-              from the Worker.
-            </p>
+            <p>Use the invite token and OTP to open the live Curve AI field desk in this browser.</p>
           </div>
           <div className="hero-card">
-            <span className="pill accent">Cloudflare Pages</span>
-            <strong>Internal staff surface</strong>
-            <p className="muted">Auth, queue, setup, and test scenarios in one browser app.</p>
+            <span className="pill accent">{staffBrand.badgeLabel}</span>
+            <strong>{staffBrand.badgeTitle}</strong>
+            <p className="muted">{staffBrand.badgeDescription}</p>
           </div>
         </header>
 
@@ -980,7 +975,7 @@ export default function App() {
 
   if (hydrating) {
     return (
-      <div className="shell auth-shell">
+      <div className="shell auth-shell" style={staffBrandStyle}>
         <div className="container">
           <div className="card">
             <div className="card-inner">

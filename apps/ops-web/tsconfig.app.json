@@ -18,5 +18,5 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "../../packages/shared/src/ai-test-studio.ts"]
+  "include": ["src", "../../packages/shared/src/**/*.ts"]
 }

@@ -1,16 +1,23 @@
 :root {
   color-scheme: light;
+  --bg-top: #faf8f3;
+  --bg-bottom: #f0ebe1;
+  --glow-left: rgba(44, 111, 142, 0.14);
+  --glow-right: rgba(180, 95, 64, 0.12);
   --bg: #f3efe7;
   --panel: rgba(255, 255, 255, 0.82);
   --panel-strong: #ffffff;
   --text: #1c2026;
   --muted: #606a77;
   --accent: #2c6f8e;
+  --accent-strong: #164e62;
   --accent-2: #b45f40;
   --good: #12714e;
   --warn: #8a4a16;
   --line: rgba(28, 32, 38, 0.12);
   --shadow: 0 18px 45px rgba(28, 32, 38, 0.12);
+  --font-sans: 'Avenir Next', 'Manrope', 'Segoe UI', sans-serif;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
 
 * {
@@ -25,12 +32,9 @@ body,
 }
 
 body {
-  font-family: 'Avenir Next', 'Manrope', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
-  background:
-    radial-gradient(circle at top left, rgba(44, 111, 142, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(180, 95, 64, 0.12), transparent 24%),
-    linear-gradient(180deg, #faf8f3 0%, #f0ebe1 100%);
+  background: var(--bg-top);
   color: var(--text);
   overflow-x: hidden;
 }
@@ -92,6 +96,10 @@ button {
 .shell {
   min-height: 100vh;
   padding: clamp(16px, 2.4vw, 28px);
+  background:
+    radial-gradient(circle at top left, var(--glow-left), transparent 28%),
+    radial-gradient(circle at top right, var(--glow-right), transparent 24%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
 }
 
 .dashboard-shell {
@@ -135,7 +143,10 @@ button {
 }
 
 .hero-card strong {
+  font-family: var(--font-display);
   font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .hero h1,
@@ -146,6 +157,7 @@ button {
 }
 
 .hero h1 {
+  font-family: var(--font-display);
   font-size: clamp(2rem, 4.3vw, 3.65rem);
   line-height: 0.98;
   letter-spacing: -0.04em;
@@ -163,7 +175,7 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-size: 0.74rem;
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
