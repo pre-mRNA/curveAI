@@ -9,6 +9,7 @@ coverage
 
 # Local secrets
 secrets
+secrets_d1
 secrets.local.env
 .env
 .env.local
