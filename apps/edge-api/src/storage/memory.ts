@@ -403,11 +403,18 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     }
     const calendarConnection: CalendarConnectionRecord = {
       provider: input.provider,
+      status: input.status,
       accountEmail: input.accountEmail,
       calendarId: input.calendarId,
+      calendarLabel: input.calendarLabel,
       timezone: input.timezone,
-      externalConnectionId: input.externalConnectionId,
+      authState: input.authState,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      tokenExpiresAt: input.tokenExpiresAt,
+      lastError: input.lastError,
       connectedAt: input.connectedAt,
+      updatedAt: input.updatedAt,
     };
     this.staffRecords.set(input.staffId, {
       ...existing,
@@ -417,6 +424,26 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
       updatedAt: input.updatedAt,
     });
     return clone(calendarConnection);
+  }
+
+  async getStaffByCalendarAuthState(state: string): Promise<StaffRecord | undefined> {
+    return clone(
+      [...this.staffRecords.values()].find((staff) => staff.calendarConnection?.authState === state),
+    );
+  }
+
+  async deleteStaffCalendarConnection(staffId: string): Promise<void> {
+    const existing = this.staffRecords.get(staffId);
+    if (!existing) {
+      return;
+    }
+    this.staffRecords.set(staffId, {
+      ...existing,
+      calendarProvider: undefined,
+      outlookCalendarId: undefined,
+      calendarConnection: undefined,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async listJobs(staffId?: string): Promise<JobRecord[]> {

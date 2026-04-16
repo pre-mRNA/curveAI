@@ -1,5 +1,3 @@
-export const ADMIN_TOKEN_STORAGE_KEY = 'curve-ai.admin-token';
-
 let memoryToken = '';
 
 export function readAdminToken(): string {

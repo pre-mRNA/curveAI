@@ -228,6 +228,9 @@ function buildRunFindings(run: AiTestRun) {
   if (run.runnerResult?.toolCalls.length) {
     findings.push(`Tool calls: ${run.runnerResult.toolCalls.join(', ')}`);
   }
+  if (run.runnerResult?.observedEffects?.length) {
+    findings.push(`Observed effects: ${run.runnerResult.observedEffects.join(' | ')}`);
+  }
   if (run.runnerResult?.fallbackUsed && run.runnerResult.fallbackReason) {
     findings.push(`Runner fallback: ${run.runnerResult.fallbackReason}`);
   }

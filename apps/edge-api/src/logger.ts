@@ -46,6 +46,17 @@ export function summarizeOrigin(origin: string | undefined): string | undefined 
   }
 }
 
+export function summarizeRequestPath(path: string): string {
+  const normalized = path || "/";
+  return normalized
+    .replace(/^\/onboarding\/invites\/[^/]+\/session$/, "/onboarding/invites/[code]/session")
+    .replace(/^\/onboarding\/sessions\/[^/]+(?=\/|$)/, "/onboarding/sessions/[id]")
+    .replace(/^\/uploads\/[^/]+(?=\/|$)/, "/uploads/[token]")
+    .replace(/^\/jobs\/[^/]+\/card$/, "/jobs/[id]/card")
+    .replace(/^\/customers\/[^/]+$/, "/customers/[id]")
+    .replace(/^\/assets\/photos\/[^/]+$/, "/assets/photos/[id]");
+}
+
 export function classifyRouteFamily(path: string): string {
   if (path === "/health") {
     return "health";

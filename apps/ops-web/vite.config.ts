@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 
-import { defineConfig, type ProxyOptions } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 function manualVendorChunks(id: string): string | undefined {
@@ -16,19 +16,10 @@ function manualVendorChunks(id: string): string | undefined {
   return 'vendor';
 }
 
-const proxy: Record<string, ProxyOptions> = {
-  '/api': {
-    target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000',
-    changeOrigin: true,
-    rewrite: (requestPath: string) => requestPath.replace(/^\/api/, ''),
-  },
-};
-
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
-    proxy,
   },
   build: {
     rollupOptions: {

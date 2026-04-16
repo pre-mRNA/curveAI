@@ -1,0 +1,976 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Curve AI Investor Deck</title>
+    <style>
+      :root {
+        --bg: #eef4f7;
+        --bg-soft: #dfe7eb;
+        --panel: rgba(247, 251, 253, 0.84);
+        --panel-strong: rgba(255, 255, 255, 0.96);
+        --line: rgba(16, 33, 44, 0.12);
+        --text: #10212c;
+        --muted: #5e6f7a;
+        --cyan: #1782ad;
+        --blue: #0c5f81;
+        --copper: #d77943;
+        --green: #167a5d;
+        --shadow: 0 24px 80px rgba(12, 42, 59, 0.14);
+        --slide-width: 1280px;
+        --slide-height: 720px;
+        --radius: 28px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-snap-type: y mandatory;
+        background:
+          radial-gradient(circle at top left, rgba(23, 130, 173, 0.12), transparent 28%),
+          radial-gradient(circle at top right, rgba(215, 121, 67, 0.10), transparent 24%),
+          linear-gradient(180deg, #edf4f6, #e7eef2 42%, #dfe7eb 100%);
+        color: var(--text);
+        font-family: "Avenir Next", Manrope, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 16px 72px;
+      }
+
+      a {
+        color: var(--cyan);
+      }
+
+      .deck {
+        display: grid;
+        gap: 30px;
+        justify-content: center;
+      }
+
+      .slide {
+        position: relative;
+        width: min(100%, var(--slide-width));
+        min-height: min(calc(100vw * 0.5625), var(--slide-height));
+        padding: 34px 38px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent 24%),
+          linear-gradient(180deg, rgba(251, 253, 254, 0.96), rgba(241, 246, 248, 0.96)),
+          repeating-linear-gradient(
+            90deg,
+            rgba(16, 33, 44, 0.03) 0,
+            rgba(16, 33, 44, 0.03) 1px,
+            transparent 1px,
+            transparent 64px
+          );
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        scroll-snap-align: start;
+      }
+
+      .slide::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at 85% 10%, rgba(23, 130, 173, 0.11), transparent 24%),
+          radial-gradient(circle at 20% 100%, rgba(215, 121, 67, 0.11), transparent 28%);
+        pointer-events: none;
+      }
+
+      .slide-inner {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-height: 100%;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--cyan);
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 40px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--cyan));
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      ul {
+        margin: 0;
+      }
+
+      h1 {
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: clamp(40px, 6vw, 74px);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+      }
+
+      h2 {
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: clamp(28px, 3.2vw, 46px);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+      }
+
+      h3 {
+        font-size: 18px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+
+      p,
+      li {
+        font-size: 17px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .hero-subtitle {
+        max-width: 860px;
+        font-size: 24px;
+        line-height: 1.35;
+      }
+
+      .kicker {
+        max-width: 820px;
+        color: #173040;
+        font-size: 18px;
+      }
+
+      .meta-row,
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(16, 33, 44, 0.10);
+        background: rgba(23, 130, 173, 0.08);
+        color: #20475a;
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .pill.warm {
+        background: rgba(215, 121, 67, 0.08);
+        border-color: rgba(215, 121, 67, 0.15);
+      }
+
+      .pill.success {
+        background: rgba(22, 122, 93, 0.08);
+        border-color: rgba(22, 122, 93, 0.15);
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .panel {
+        padding: 20px;
+        border-radius: 22px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+      }
+
+      .panel.strong {
+        background: var(--panel-strong);
+      }
+
+      .metric {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+
+      .metric-value {
+        font-size: clamp(30px, 3.3vw, 54px);
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+        color: var(--text);
+      }
+
+      .metric-label {
+        color: #20475a;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .caption {
+        font-size: 13px;
+        color: #6a8194;
+      }
+
+      .two-up {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .image-card {
+        display: grid;
+        gap: 12px;
+      }
+
+      .image-card img,
+      .mosaic img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 18px;
+        border: 1px solid rgba(145, 197, 255, 0.16);
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .image-card.large img {
+        max-height: 530px;
+      }
+
+      .mosaic {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .list {
+        display: grid;
+        gap: 12px;
+        padding-left: 20px;
+      }
+
+      .list.tight {
+        gap: 8px;
+      }
+
+      .table {
+        display: grid;
+        gap: 1px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        overflow: hidden;
+        background: var(--line);
+      }
+
+      .table-row {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 1px;
+        background: var(--line);
+      }
+
+      .table-row > div {
+        padding: 14px 16px;
+        background: rgba(251, 253, 255, 0.96);
+      }
+
+      .table-row.header > div {
+        background: rgba(235, 244, 247, 0.98);
+        color: #20475a;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .footer-note {
+        margin-top: auto;
+        font-size: 12px;
+        color: #6b8497;
+      }
+
+      .stage {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(16, 33, 44, 0.10);
+        color: #20475a;
+        font-size: 13px;
+      }
+
+      .stage::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--cyan);
+      }
+
+      .stage.plan::before {
+        background: var(--copper);
+      }
+
+      .footnotes {
+        display: grid;
+        gap: 8px;
+        font-size: 12px;
+        color: #70879a;
+      }
+
+      @media (max-width: 1100px) {
+        .slide {
+          min-height: auto;
+        }
+
+        .grid-2,
+        .grid-3,
+        .grid-4,
+        .two-up,
+        .table-row,
+        .mosaic {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media print {
+        html,
+        body {
+          background: #eef4f7;
+        }
+
+        body {
+          padding: 0;
+        }
+
+        .deck {
+          gap: 0;
+        }
+
+        .slide {
+          width: 100%;
+          min-height: 100vh;
+          border-radius: 0;
+          page-break-after: always;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="deck">
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Curve AI | Investor Narrative</span>
+          <div class="pill-row">
+            <span class="pill">Canonical To Current Repo</span>
+            <span class="pill warm">Browser-First MVP</span>
+            <span class="pill success">Current Brand: Curve AI</span>
+          </div>
+          <h1>Voice operations for tradies</h1>
+          <p class="hero-subtitle">
+            Curve AI is building the operating system for small trade businesses: AI voice handling, structured onboarding,
+            customer photo capture, field execution, and internal evaluation in one phone-first stack.
+          </p>
+          <p class="kicker">
+            The product today is a split Cloudflare Pages + Worker platform with public onboarding, public customer upload,
+            a tradie field app, an internal ops console, and a test studio for evaluating agent behavior before it reaches customers.
+          </p>
+          <div class="grid grid-4">
+            <div class="panel metric">
+              <div class="metric-label">Setup</div>
+              <div class="metric-value">Voice + rules + calendar</div>
+              <p>Invite-driven onboarding captures business facts, pricing style, and staff preferences.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-label">Customer Flow</div>
+              <div class="metric-value">Call, quote, photos, callback</div>
+              <p>Voice tools create quotes, callbacks, appointments, and secure photo-upload requests.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-label">Field Desk</div>
+              <div class="metric-value">Phone-first job execution</div>
+              <p>Tradies see queue, job card, photos, notes, and setup progress in one field surface.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-label">Control Room</div>
+              <div class="metric-value">Ops + AI evaluation</div>
+              <p>Internal staff monitor jobs, callbacks, pricing behavior, and judged AI test runs.</p>
+            </div>
+          </div>
+          <p class="footer-note">Repo-grounded summary from README, docs/mvp-board.md, docs/agent-log.md, and current Pages/Worker implementations.</p>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Problem</span>
+          <h2>Trades are still run through phones, memory, and fragmented admin</h2>
+          <div class="grid grid-3">
+            <div class="panel strong">
+              <h3>Small firms dominate</h3>
+              <p>Australia has <strong>410,602 construction firms</strong>, and <strong>98.5%</strong> have fewer than 20 employees.</p>
+              <p class="caption">CEDA analysis of ABS business-count data.</p>
+            </div>
+            <div class="panel strong">
+              <h3>Productivity is under pressure</h3>
+              <p>Housing construction labour productivity is down <strong>12%</strong> over roughly 30 years, while the broader economy is up <strong>49%</strong>.</p>
+              <p class="caption">Productivity Commission, 2025.</p>
+            </div>
+            <div class="panel strong">
+              <h3>The demand side is huge</h3>
+              <p>Australia has roughly <strong>11.2 million residential dwellings</strong>, giving the category a large installed base of homes and service demand.</p>
+              <p class="caption">ABS Total Value of Dwellings, June quarter 2024.</p>
+            </div>
+          </div>
+          <div class="two-up">
+            <div class="panel">
+              <h3>What breaks today</h3>
+              <ul class="list">
+                <li>Missed calls and after-hours enquiries leak jobs before quoting even starts.</li>
+                <li>Customer context lives in heads, SMS threads, and disconnected tools.</li>
+                <li>Photo requests, callbacks, and scheduling are manual and inconsistent.</li>
+                <li>Small firms lack the process discipline and management tooling of scaled operators.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Why AI is a fit here</h3>
+              <ul class="list">
+                <li>Trades are still phone-driven, which gives voice AI a natural entry point.</li>
+                <li>Most jobs follow recurring patterns: qualify, request evidence, book, quote, hand off.</li>
+                <li>The highest-value memory is operational, not abstract: pricing rules, service area, customer history, and escalation logic.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="footnotes">
+            <div>[1] CEDA, <em>Size matters: why construction productivity is so weak</em>, 2025, citing ABS counts of businesses.</div>
+            <div>[2] Productivity Commission, <em>Housing construction productivity: Can we fix it?</em>, 2025.</div>
+            <div>[3] ABS, <em>Total Value of Dwellings, June Quarter 2024</em>.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Why Now</span>
+          <h2>The market is ready for a voice-first operating layer</h2>
+          <div class="grid grid-4">
+            <div class="panel metric">
+              <div class="metric-value">$139B</div>
+              <div class="metric-label">Annual housing construction spend</div>
+              <p>In the year to June 2024, Australia spent $139 billion on housing construction, including $83 billion on new housing.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-value">1.2M</div>
+              <div class="metric-label">National Housing Accord target</div>
+              <p>Australian governments aim to build 1.2 million homes over five years, which puts more pressure on field productivity.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-value">$4.91B</div>
+              <div class="metric-label">Global FSM market in 2023</div>
+              <p>The field service management software category is large already and still growing fast.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-value">$11.78B</div>
+              <div class="metric-label">Projected FSM market by 2030</div>
+              <p>Grand View Research projects a 13.3% CAGR through 2030.</p>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="panel">
+              <h3>The enabling stack has arrived</h3>
+              <ul class="list">
+                <li>Realtime voice agents can now run structured service workflows, not just chat demos.</li>
+                <li>Cloudflare-native app delivery keeps latency low and deployment operationally light.</li>
+                <li>Portable model adapters let the core logic move over time toward Australian-hosted inference.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Curve AI’s timing advantage</h3>
+              <ul class="list">
+                <li>Start as workflow AI, not generic chatbot AI.</li>
+                <li>Own the customer journey from first call through evidence capture and field handoff.</li>
+                <li>Build evaluation in from day one so the product can harden before scale.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="footnotes">
+            <div>[4] Productivity Commission, 2025, housing construction expenditure and Accord targets.</div>
+            <div>[5] Grand View Research, <em>Field Service Management Market Size &amp; Share Report 2030</em>, updated Oct 2023.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Product</span>
+          <h2>A four-surface AI operating system for trade businesses</h2>
+          <div class="mosaic">
+            <div class="image-card panel">
+              <img src="./assets/investor-deck/onboarding-landing.png" alt="Curve AI onboarding landing" />
+              <div>
+                <h3>Curve AI Setup</h3>
+                <p>Invite-driven onboarding for voice, pricing, calendar, rules, and identity.</p>
+              </div>
+            </div>
+            <div class="image-card panel">
+              <img src="./assets/investor-deck/upload-route.png" alt="Curve AI photo request route" />
+              <div>
+                <h3>Curve AI Photos</h3>
+                <p>Customer-safe photo collection with clear instructions and job context.</p>
+              </div>
+            </div>
+            <div class="image-card panel">
+              <img src="./assets/investor-deck/staff-field-desk.png" alt="Curve AI field desk screenshot" />
+              <div>
+                <h3>Curve AI Field Desk</h3>
+                <p>Phone-first queue, setup, and job-card surface for tradies.</p>
+              </div>
+            </div>
+            <div class="image-card panel">
+              <img src="./assets/investor-deck/ops-control-room.png" alt="Curve AI control room screenshot" />
+              <div>
+                <h3>Curve AI Control Room</h3>
+                <p>Internal queue management, callback oversight, and AI test operations.</p>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-4">
+            <div class="panel"><p><strong>Public</strong><br />Onboarding and photo flows are guardrailed but simple enough for non-technical users.</p></div>
+            <div class="panel"><p><strong>Field</strong><br />The staff app prioritizes mobile execution rather than admin-heavy desktop metaphors.</p></div>
+            <div class="panel"><p><strong>Internal</strong><br />Ops can review jobs, callbacks, pricing behavior, and evaluation results in one place.</p></div>
+            <div class="panel"><p><strong>Unified brand</strong><br />All four surfaces are tied together as one operating system, not disconnected tools.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Experience</span>
+          <h2>The user journey is designed to feel simple even when the system behind it is not</h2>
+          <div class="table">
+            <div class="table-row header">
+              <div>Moment</div>
+              <div>What the user sees</div>
+              <div>What the system does</div>
+            </div>
+            <div class="table-row">
+              <div><strong>Staff setup</strong></div>
+              <div>Answer guided questions, connect calendar, record voice, confirm business rules.</div>
+              <div>Create staff profile, pricing profile, consent records, interview transcript, and initial agent settings.</div>
+            </div>
+            <div class="table-row">
+              <div><strong>Customer call</strong></div>
+              <div>Fast, natural MVP voice flow that can qualify, request photos, create callbacks, and attempt quote or booking actions.</div>
+              <div>Route through voice tools, callbacks, appointments, upload requests, and post-call persistence, with deeper provider hardening still underway.</div>
+            </div>
+            <div class="table-row">
+              <div><strong>Photo request</strong></div>
+              <div>Receive a simple link, take photos, submit, and get confirmation.</div>
+              <div>Create tokenized upload request, store images in R2, update job state, and attach evidence.</div>
+            </div>
+            <div class="table-row">
+              <div><strong>Tradie handoff</strong></div>
+              <div>Open phone-first queue, see job card, call customer, review photos, move to next job.</div>
+              <div>Read customer profile, notes, quote context, appointment data, and linked artifacts.</div>
+            </div>
+            <div class="table-row">
+              <div><strong>Ops oversight</strong></div>
+              <div>See queues, callbacks, evaluation results, and judged test runs before broader rollout.</div>
+              <div>Persist cases and judged runs, monitor readiness, and tighten workflows over time.</div>
+            </div>
+          </div>
+          <p class="footer-note">This reflects the current Worker/Pages product shape, not a speculative future-state deck.</p>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Intelligence</span>
+          <h2>Memory and intelligence are the moat, not just the voice layer</h2>
+          <div class="grid grid-2">
+            <div class="panel strong">
+              <h3>Operational memory</h3>
+              <ul class="list">
+                <li><strong>Staff memory:</strong> voice consent, communication style, pricing heuristics, calendar connection, service rules.</li>
+                <li><strong>Customer memory:</strong> normalized profile, jobs, calls, uploads, photos, callbacks, and appointments.</li>
+                <li><strong>Artifact memory:</strong> photo evidence and voice samples stored as durable assets.</li>
+                <li><strong>Evaluation memory:</strong> saved AI test cases and judged runs for regression testing.</li>
+              </ul>
+            </div>
+            <div class="panel strong">
+              <h3>Intelligence loops</h3>
+              <ul class="list">
+                <li><strong>Realtime voice:</strong> route-specific tools for quotes, callbacks, bookings, and photo requests.</li>
+                <li><strong>Structured extraction:</strong> onboarding turns become editable operating profiles, not free-text notes.</li>
+                <li><strong>AI test studio:</strong> internal runner/judge loop exists today, with deeper real side-effect evaluation still in progress.</li>
+                <li><strong>Portable inference:</strong> provider adapters separate product logic from any one hosted model vendor.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="grid grid-4">
+            <div class="panel"><h3>D1</h3><p>System-of-record for jobs, customers, uploads, sessions, cases, and runs.</p></div>
+            <div class="panel"><h3>R2</h3><p>Photo evidence, voice artifacts, and related assets.</p></div>
+            <div class="panel"><h3>Durable Objects</h3><p>Lightweight onboarding session coordination metadata today, with deeper orchestration still to come.</p></div>
+            <div class="panel"><h3>Shared contracts</h3><p>One typed vocabulary across apps, providers, and evaluation flows.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Architecture</span>
+          <h2>Cloudflare-native frontend, Worker control plane, portable provider adapters</h2>
+          <div class="grid grid-3">
+            <div class="panel">
+              <h3>Delivery</h3>
+              <ul class="list tight">
+                <li>Separate Cloudflare Pages apps for onboarding, upload, staff, and ops.</li>
+                <li>Phone-first UI and light entry bundles for fast public routes.</li>
+                <li>Staging protection designed around Cloudflare Access and review gates.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Control plane</h3>
+              <ul class="list tight">
+                <li>Cloudflare Worker API as the shared backend boundary.</li>
+                <li>D1 for durable state, R2 for assets, Durable Objects for lightweight session coordination.</li>
+                <li>Structured logging, request IDs, signed tool routes, route guards, and tokenized uploads.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Adapters</h3>
+              <ul class="list tight">
+                <li>ElevenLabs realtime browser session adapter.</li>
+                <li>Microsoft calendar adapter with local mock endpoints for integration testing.</li>
+                <li>Twilio-style messaging adapter and OpenAI-compatible reasoning/test adapters.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="panel">
+              <h3>What is real today</h3>
+              <div class="stack">
+                <span class="stage">Browser onboarding, upload, staff, and ops surfaces are implemented</span>
+                <span class="stage">Worker-backed jobs, uploads, photo assets, staff auth, and test studio are implemented</span>
+                <span class="stage">Provider-backed local integration tests exist for ElevenLabs, Microsoft, and Twilio-style mocks</span>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>What is still being hardened</h3>
+              <div class="stack">
+                <span class="stage plan">Calendar credential model and full production-grade token storage</span>
+                <span class="stage plan">Deeper AI test realism against real side effects and route execution</span>
+                <span class="stage plan">Full live-provider depth and operational hardening for production rollout</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Detailed Applications</span>
+          <h2>Each surface solves a concrete operational bottleneck</h2>
+          <div class="grid grid-2">
+            <div class="panel">
+              <h3>1. Guided Setup</h3>
+              <p>Turn a tradie into an AI operator profile: business details, pricing style, exclusions, tone, voice consent, and the first pass of calendar setup.</p>
+            </div>
+            <div class="panel">
+              <h3>2. Photo Request</h3>
+              <p>Collect job evidence fast, with less back-and-forth. This is one of the cleanest ways to move from a voice interaction into a structured quote or callback.</p>
+            </div>
+            <div class="panel">
+              <h3>3. Field Desk</h3>
+              <p>Make the tradie app job-centric, not CRM-centric: next step, notes, customer context, photos, and quick actions first.</p>
+            </div>
+            <div class="panel">
+              <h3>4. Control Room + Test Studio</h3>
+              <p>Give internal operators a way to watch queues, tighten workflows, and run judged tests before deploying agent changes more broadly.</p>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="image-card panel large">
+              <img src="./assets/investor-deck/onboarding-route.png" alt="Onboarding route" />
+              <div>
+                <h3>Setup is a product, not a settings page</h3>
+                <p>That matters because onboarding is where agent quality, safety, and differentiation are actually created.</p>
+              </div>
+            </div>
+            <div class="image-card panel large">
+              <img src="./assets/investor-deck/upload-route.png" alt="Customer upload route" />
+              <div>
+                <h3>Customer evidence capture is part of the moat</h3>
+                <p>Photos are a high-signal bridge between enquiry, pricing, dispatch, and field execution.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Market</span>
+          <h2>Market wedge starts with Australia’s fragmented trade base and expands into a global FSM category</h2>
+          <div class="grid grid-3">
+            <div class="panel metric">
+              <div class="metric-value">410,602</div>
+              <div class="metric-label">Australian construction firms</div>
+              <p>Initial wedge is not enterprise field service. It is fragmented trade operators.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-value">98.5%</div>
+              <div class="metric-label">Under 20 employees</div>
+              <p>This is a software and process problem more than a headcount problem.</p>
+            </div>
+            <div class="panel metric">
+              <div class="metric-value">11.2M</div>
+              <div class="metric-label">Australian dwellings</div>
+              <p>Australia’s residential footprint is large enough to support a substantial service-trade software layer.</p>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="panel strong">
+              <h3>Directional Australian revenue ceiling</h3>
+              <ul class="list">
+                <li><strong>Initial wedge:</strong> Australian residential and light-commercial trade SMBs.</li>
+                <li><strong>Base count:</strong> 410,602 construction firms in Australia.</li>
+                <li><strong>Directional ceiling:</strong> if the full Australian construction-firm base eventually spent A$4k to A$12k ACV on this category, that implies roughly <strong>A$1.6B to A$4.9B</strong> of annual software revenue potential.</li>
+                <li><strong>Canonical caveat:</strong> this is a planning ceiling, not a present serviceable market claim, and the early reachable wedge is materially smaller.</li>
+              </ul>
+            </div>
+            <div class="panel strong">
+              <h3>Top-down category signal</h3>
+              <ul class="list">
+                <li>Global FSM software market estimated at <strong>US$4.91B in 2023</strong>.</li>
+                <li>Projected to reach <strong>US$11.78B by 2030</strong> at <strong>13.3% CAGR</strong>.</li>
+                <li>Curve AI is not trying to be generic FSM. It is carving the voice + workflow + evidence + evaluation layer for trade operators.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="footnotes">
+            <div>[6] Bottom-up ACV range is an internal inference for deck planning, not a sourced market-size statistic.</div>
+            <div>[7] CEDA, 2025; ABS, 2024; Grand View Research, 2023 update.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Go-To-Market</span>
+          <h2>Win with a narrow wedge, then expand into the operating system</h2>
+          <div class="grid grid-3">
+            <div class="panel">
+              <h3>ICP</h3>
+              <ul class="list tight">
+                <li>2-20 person trade businesses</li>
+                <li>Residential-first or mixed residential/light commercial</li>
+                <li>Phone-heavy lead intake</li>
+                <li>Owner-operator or dispatcher-led workflows</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Land</h3>
+              <ul class="list tight">
+                <li>After-hours call handling</li>
+                <li>Secure photo requests for quote qualification</li>
+                <li>Faster callback capture and tradie handoff</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Expand</h3>
+              <ul class="list tight">
+                <li>Calendar booking</li>
+                <li>Per-staff voice profiles and operating rules</li>
+                <li>Evaluation, experimentation, and broader CRM/calendar integrations</li>
+              </ul>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="panel">
+              <h3>Why this wedge works</h3>
+              <p>The first ROI moment is easy to understand: fewer missed jobs, cleaner qualification, better evidence before dispatch, and less admin drag around callbacks and scheduling.</p>
+            </div>
+            <div class="panel">
+              <h3>Channel logic</h3>
+              <p>Founder-led sales, industry partnerships, trade associations, managed pilots with early operators, and strong case studies in the first verticals before broader rollout.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Business Model</span>
+          <h2>Proposed usage-led platform pricing with clear expansion paths</h2>
+          <div class="grid grid-3">
+            <div class="panel strong">
+              <h3>Core subscription</h3>
+              <p>Per business or per staffed line for onboarding, field desk, control room, and memory infrastructure.</p>
+            </div>
+            <div class="panel strong">
+              <h3>Usage</h3>
+              <p>Voice minutes, provider costs, SMS, and AI evaluation volume can scale with customer value and operational load.</p>
+            </div>
+            <div class="panel strong">
+              <h3>Expansion</h3>
+              <p>Additional staff seats, additional lines, premium eval tooling, deeper integration packages, and enterprise workflow controls.</p>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Canonical note</h3>
+            <p>This repo does <strong>not</strong> yet encode a final commercial pricing model. These are investor-facing monetization paths implied by the current architecture and product shape, not already-shipped billing logic.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Moat</span>
+          <h2>The moat is operational data, evaluation discipline, and integration depth</h2>
+          <div class="grid grid-2">
+            <div class="panel strong">
+              <h3>Why this can compound</h3>
+              <ul class="list">
+                <li>Every onboarding session produces structured operating logic.</li>
+                <li>Every upload and job grows the customer evidence graph.</li>
+                <li>Every judged test run improves the safety and quality of future deployments.</li>
+                <li>Every provider adapter increases portability and reduces platform lock-in over time.</li>
+              </ul>
+            </div>
+            <div class="panel strong">
+              <h3>What competitors usually miss</h3>
+              <ul class="list">
+                <li>Generic voice demos without real field workflow.</li>
+                <li>Traditional FSM without strong voice entry points.</li>
+                <li>AI features without disciplined evaluation before release.</li>
+                <li>Admin-heavy UX that fails in the cab, on site, or after hours.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Roadmap</span>
+          <h2>What exists now, what comes next</h2>
+          <div class="grid grid-2">
+            <div class="panel">
+              <h3>Current repo-backed MVP</h3>
+              <ul class="list">
+                <li>Cloudflare Pages apps for onboarding, customer upload, staff, and ops.</li>
+                <li>Cloudflare Worker API with D1, R2, auth routes, uploads, assets, jobs, and voice tools.</li>
+                <li>Structured onboarding and extraction review.</li>
+                <li>Phone-first staff field desk.</li>
+                <li>Worker-backed AI test studio.</li>
+                <li>Mock and configurable provider integration paths for ElevenLabs, Microsoft, Twilio, and OpenAI-compatible reasoning.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Next product hardening moves</h3>
+              <ul class="list">
+                <li>Production-grade Microsoft token and refresh-session model.</li>
+                <li>Deeper real-provider rollout for calendar, messaging, and voice execution.</li>
+                <li>AI test studio that exercises real Worker side effects instead of mainly simulated text behavior.</li>
+                <li>More transactional persistence guarantees and stricter production security defaults.</li>
+                <li>Later native iOS port if the field web app proves the right workflow.</li>
+              </ul>
+            </div>
+          </div>
+          <p class="footer-note">This slide is intentionally split between “real now” and “next” to stay canonical to the current codebase.</p>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Current Hardening Edges</span>
+          <h2>The product shape is real; the remaining work is depth and hardening</h2>
+          <div class="grid grid-3">
+            <div class="panel strong">
+              <h3>Calendar depth</h3>
+              <p>Microsoft connection exists in onboarding, but the staff-side calendar setup is still a temporary manual mapping step.</p>
+            </div>
+            <div class="panel strong">
+              <h3>AI test realism</h3>
+              <p>The test studio is real and persistent today, but it still leans too heavily on simulated text behavior instead of full route-side execution.</p>
+            </div>
+            <div class="panel strong">
+              <h3>Provider hardening</h3>
+              <p>Realtime voice, messaging, and calendar adapters are in place, with full production-grade credential and operational hardening still underway.</p>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Why this matters for the deck</h3>
+            <p>The strongest canonical story is not “everything is finished.” It is “the product shape is already live in-browser, and the remaining work is hardening execution depth rather than inventing the product.” The current onboarding flow also still behaves as a single active invite session rather than a fully resumable multi-device setup.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <span class="eyebrow">Close</span>
+          <h2>Curve AI can become the operating system for high-friction trade workflows</h2>
+          <div class="grid grid-2">
+            <div class="panel strong">
+              <h3>Why it matters</h3>
+              <ul class="list">
+                <li>The category is large, fragmented, and operationally messy.</li>
+                <li>Voice is the natural entry point, but voice alone is not enough.</li>
+                <li>The winning product is the one that remembers, evaluates, and coordinates the entire workflow.</li>
+              </ul>
+            </div>
+            <div class="panel strong">
+              <h3>Investor takeaway</h3>
+              <ul class="list">
+                <li>The product already exists as a browser-first Cloudflare MVP.</li>
+                <li>The architecture is set up to harden into real provider-backed operations.</li>
+                <li>The company can start in Australian trades and expand into a much larger global field-service software category.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="footnotes">
+            <div>Source notes and calculation details: <a href="./investor-deck-sources.md">docs/investor-deck-sources.md</a></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -126,11 +126,17 @@ interface StaffSessionRow {
 interface StaffCalendarConnectionRow {
   staff_id: string;
   provider: "outlook";
+  status: "pending" | "connected" | "error";
   account_email: string | null;
   calendar_id: string | null;
+  calendar_label: string | null;
   timezone: string | null;
-  external_connection_id: string | null;
-  connected_at: string;
+  auth_state: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  last_error: string | null;
+  connected_at: string | null;
   updated_at: string;
 }
 
@@ -1102,25 +1108,38 @@ export class D1OnboardingRepository implements OnboardingRepository {
     await this.db
       .prepare(
         `INSERT INTO staff_calendar_connections (
-          staff_id, provider, account_email, calendar_id, timezone, external_connection_id, connected_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          staff_id, provider, status, account_email, calendar_id, calendar_label, timezone,
+          auth_state, access_token, refresh_token, token_expires_at, last_error, connected_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id) DO UPDATE SET
           provider = excluded.provider,
+          status = excluded.status,
           account_email = excluded.account_email,
           calendar_id = excluded.calendar_id,
+          calendar_label = excluded.calendar_label,
           timezone = excluded.timezone,
-          external_connection_id = excluded.external_connection_id,
+          auth_state = excluded.auth_state,
+          access_token = excluded.access_token,
+          refresh_token = excluded.refresh_token,
+          token_expires_at = excluded.token_expires_at,
+          last_error = excluded.last_error,
           connected_at = excluded.connected_at,
           updated_at = excluded.updated_at`,
       )
       .bind(
         input.staffId,
         input.provider,
+        input.status,
         input.accountEmail ?? null,
         input.calendarId ?? null,
+        input.calendarLabel ?? null,
         input.timezone ?? null,
-        input.externalConnectionId ?? null,
-        input.connectedAt,
+        input.authState ?? null,
+        input.accessToken ?? null,
+        input.refreshToken ?? null,
+        input.tokenExpiresAt ?? null,
+        input.lastError ?? null,
+        input.connectedAt ?? null,
         input.updatedAt,
       )
       .run();
@@ -1134,12 +1153,42 @@ export class D1OnboardingRepository implements OnboardingRepository {
 
     return {
       provider: input.provider,
+      status: input.status,
       accountEmail: input.accountEmail,
       calendarId: input.calendarId,
+      calendarLabel: input.calendarLabel,
       timezone: input.timezone,
-      externalConnectionId: input.externalConnectionId,
+      authState: input.authState,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      tokenExpiresAt: input.tokenExpiresAt,
+      lastError: input.lastError,
       connectedAt: input.connectedAt,
+      updatedAt: input.updatedAt,
     };
+  }
+
+  async getStaffByCalendarAuthState(state: string): Promise<StaffRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT staff_id FROM staff_calendar_connections WHERE auth_state = ? LIMIT 1`)
+      .bind(state)
+      .first<{ staff_id: string }>();
+    if (!row?.staff_id) {
+      return undefined;
+    }
+    return this.getStaff(row.staff_id);
+  }
+
+  async deleteStaffCalendarConnection(staffId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(`DELETE FROM staff_calendar_connections WHERE staff_id = ?`)
+      .bind(staffId)
+      .run();
+    await this.db
+      .prepare(`UPDATE onboarding_staff_profiles SET calendar_provider = NULL, updated_at = ? WHERE staff_id = ?`)
+      .bind(now, staffId)
+      .run();
   }
 
   async listJobs(staffId?: string): Promise<JobRecord[]> {
@@ -1189,6 +1238,8 @@ export class D1OnboardingRepository implements OnboardingRepository {
 
     const normalizedPhone = customerRow.normalized_phone ?? undefined;
     const normalizedEmail = customerRow.normalized_email ?? undefined;
+    const rawPhone = customerRow.phone_number ?? null;
+    const normalizedEmailParam = normalizedEmail ?? null;
     const jobRows = await this.db
       .prepare(
         `SELECT * FROM crm_jobs
@@ -1197,7 +1248,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
             OR (? IS NOT NULL AND lower(caller_email) = ?)
          ORDER BY updated_at DESC`,
       )
-      .bind(customerId, customerRow.phone_number, customerRow.phone_number, normalizedEmail, normalizedEmail)
+      .bind(customerId, rawPhone, rawPhone, normalizedEmailParam, normalizedEmailParam)
       .all<JobRow>();
     const jobs = (jobRows.results ?? []).map(rowToJob);
     if (jobs.length === 0) {
@@ -1237,7 +1288,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
                   OR (? IS NOT NULL AND caller_phone = ?)
                ORDER BY updated_at DESC`,
             )
-            .bind(...jobIds, customerRow.phone_number, customerRow.phone_number)
+            .bind(...jobIds, rawPhone, rawPhone)
             .all<CallRow>()
         : { results: [] as CallRow[] };
     const uploadRows =
@@ -1249,7 +1300,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
                   OR (? IS NOT NULL AND caller_phone = ?)
                ORDER BY created_at DESC`,
             )
-            .bind(...jobIds, customerRow.phone_number, customerRow.phone_number)
+            .bind(...jobIds, rawPhone, rawPhone)
             .all<UploadRequestRow>()
         : { results: [] as UploadRequestRow[] };
     const photoRows =
@@ -1791,17 +1842,6 @@ export class D1OnboardingRepository implements OnboardingRepository {
       return undefined;
     }
     const nextFileCount = request.fileCount + photos.length;
-    const updateResult = await this.db
-      .prepare(
-        `UPDATE crm_upload_requests
-         SET status = ?, completed_at = ?, file_count = ?
-         WHERE token = ? AND status = ? AND expires_at > ?`,
-      )
-      .bind("completed", now, nextFileCount, row.token, "pending", now)
-      .run();
-    if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
-      return undefined;
-    }
     for (const photo of photos) {
       await this.db
         .prepare(
@@ -1820,14 +1860,6 @@ export class D1OnboardingRepository implements OnboardingRepository {
         )
         .run();
     }
-    const updatedRequest: UploadRequestRecord = {
-      ...request,
-      status: "completed",
-      completedAt: now,
-      fileCount: nextFileCount,
-      files: [...request.files, ...photos],
-    };
-
     const job = await this.getJobById(request.jobId);
     if (job) {
       const nextPhotos = [...job.photos, ...photos];
@@ -1837,6 +1869,25 @@ export class D1OnboardingRepository implements OnboardingRepository {
         updatedAt: now,
       });
     }
+
+    const updateResult = await this.db
+      .prepare(
+        `UPDATE crm_upload_requests
+         SET status = ?, completed_at = ?, file_count = ?
+         WHERE token = ? AND status = ? AND expires_at > ?`,
+      )
+      .bind("completed", now, nextFileCount, row.token, "pending", now)
+      .run();
+    if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
+      return undefined;
+    }
+    const updatedRequest: UploadRequestRecord = {
+      ...request,
+      status: "completed",
+      completedAt: now,
+      fileCount: nextFileCount,
+      files: [...request.files, ...photos],
+    };
 
     return updatedRequest;
   }
@@ -2034,11 +2085,18 @@ export class D1OnboardingRepository implements OnboardingRepository {
     const calendarConnection = calendarRow
       ? {
           provider: calendarRow.provider,
+          status: calendarRow.status,
           accountEmail: calendarRow.account_email ?? undefined,
           calendarId: calendarRow.calendar_id ?? undefined,
+          calendarLabel: calendarRow.calendar_label ?? undefined,
           timezone: calendarRow.timezone ?? undefined,
-          externalConnectionId: calendarRow.external_connection_id ?? undefined,
-          connectedAt: calendarRow.connected_at,
+          authState: calendarRow.auth_state ?? undefined,
+          accessToken: calendarRow.access_token ?? undefined,
+          refreshToken: calendarRow.refresh_token ?? undefined,
+          tokenExpiresAt: calendarRow.token_expires_at ?? undefined,
+          lastError: calendarRow.last_error ?? undefined,
+          connectedAt: calendarRow.connected_at ?? undefined,
+          updatedAt: calendarRow.updated_at,
         }
       : undefined;
 

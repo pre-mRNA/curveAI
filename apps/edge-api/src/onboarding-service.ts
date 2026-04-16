@@ -152,6 +152,16 @@ export class OnboardingService {
     };
   }
 
+  async rollbackSessionStart(inviteCode: string, sessionId: string): Promise<void> {
+    const invite = await this.options.repo.getInviteByCode(inviteCode);
+    if (!invite || invite.sessionId !== sessionId) {
+      return;
+    }
+    invite.sessionId = undefined;
+    invite.status = "pending";
+    await this.options.repo.saveInvite(invite);
+  }
+
   async authenticateSession(sessionId: string, token: string): Promise<OnboardingSessionRecord | undefined> {
     const session = await this.options.repo.getSessionById(sessionId);
     if (!session || isExpired(session.expiresAt)) {
@@ -190,13 +200,11 @@ export class OnboardingService {
     }
 
     this.ensureMutable(session, "start a new realtime interview");
-    session.consentAccepted = input.consentAccepted;
-    session.cloneConsentAccepted = input.cloneConsentAccepted;
     const voiceSession = await this.options.providers.realtimeVoice.issueBrowserSession({
       sessionId: session.id,
-      staffName: session.review.staffProfile.staffName.trim() || session.staffName,
-      consentAccepted: session.consentAccepted,
     });
+    session.consentAccepted = input.consentAccepted;
+    session.cloneConsentAccepted = input.cloneConsentAccepted;
     session.voiceSession = voiceSession;
     session.status = "interviewing";
     session.updatedAt = new Date().toISOString();
@@ -270,10 +278,9 @@ export class OnboardingService {
   async startCalendar(session: OnboardingSessionRecord) {
     this.ensureMutable(session, "start calendar authorization");
     const calendar = await this.options.providers.calendar.startAuth({
-      sessionId: session.id,
-      inviteCode: session.inviteCode,
       staffName: session.review.staffProfile.staffName.trim() || session.staffName,
       publicApiUrl: this.options.config.publicApiUrl,
+      redirectUri: `${this.options.config.publicApiUrl.replace(/\/$/, "")}/onboarding/calendar/microsoft/callback`,
     });
     session.calendar = calendar;
     session.status = calendar.status === "connected" ? "voice_sample" : "calendar";
@@ -285,7 +292,7 @@ export class OnboardingService {
 
   async completeCalendar(
     state: string,
-    input: { code?: string; accountEmail?: string; calendarLabel?: string },
+    input: { code?: string; accountEmail?: string; calendarLabel?: string; redirectUri?: string },
   ) {
     const session = await this.options.repo.getSessionByCalendarState(state);
     if (!session) {
@@ -299,19 +306,53 @@ export class OnboardingService {
       throw new OnboardingRuleError("Microsoft returned no authorization code.", 400);
     }
 
-    const calendar = await this.options.providers.calendar.completeAuth({
+    const completed = await this.options.providers.calendar.completeAuth({
       state,
       code: input.code,
       accountEmail: input.accountEmail,
       calendarLabel: input.calendarLabel,
+      redirectUri: input.redirectUri,
     });
+    const updatedAt = new Date().toISOString();
+    const invite = await this.options.repo.getInviteById(session.inviteId);
+    await this.options.repo.upsertStaffProfile({
+      staffId: session.staffId,
+      fullName: session.review.staffProfile.staffName.trim() || session.staffName,
+      phoneNumber: invite?.phoneNumber,
+      email: invite?.email,
+      role: session.review.staffProfile.role || invite?.role,
+      companyName: session.review.staffProfile.companyName || undefined,
+      calendarProvider: "outlook",
+      communication: undefined,
+      pricing: undefined,
+      business: undefined,
+      crm: undefined,
+      updatedAt,
+    });
+    await this.options.repo.saveStaffCalendarConnection({
+      staffId: session.staffId,
+      provider: "outlook",
+      status: completed.summary.status,
+      accountEmail: completed.summary.accountEmail,
+      calendarId: completed.summary.calendarId,
+      calendarLabel: completed.summary.calendarLabel,
+      timezone: undefined,
+      authState: undefined,
+      accessToken: completed.credential?.accessToken,
+      refreshToken: completed.credential?.refreshToken,
+      tokenExpiresAt: completed.credential?.tokenExpiresAt,
+      lastError: undefined,
+      connectedAt: completed.summary.connectedAt ?? updatedAt,
+      updatedAt,
+    });
+    session.review.staffProfile.calendarProvider = "outlook";
     session.calendar = {
-      ...calendar,
+      ...completed.summary,
       authState: undefined,
       authUrl: undefined,
     };
     session.status = "voice_sample";
-    session.updatedAt = new Date().toISOString();
+    session.updatedAt = updatedAt;
     await this.options.repo.saveSession(session);
     await this.touchCoordinator(session.id, "calendar-complete", session.status);
     return this.getSessionSummary(session);
@@ -372,19 +413,8 @@ export class OnboardingService {
       throw new OnboardingRuleError("Upload a voice sample before finalizing onboarding.", 400);
     }
 
-    session.status = "completed";
-    session.finalizedAt = new Date().toISOString();
-    session.updatedAt = session.finalizedAt;
-    session.participantTokenHash = await sha256Hex(createParticipantToken());
-    await this.options.repo.saveSession(session);
-
     const invite = await this.options.repo.getInviteById(session.inviteId);
-    if (invite) {
-      invite.status = "completed";
-      invite.sessionId = session.id;
-      await this.options.repo.saveInvite(invite);
-    }
-
+    const finalizedAt = new Date().toISOString();
     const effectiveName = session.review.staffProfile.staffName.trim() || session.staffName;
     await Promise.all([
       this.options.repo.upsertStaffProfile({
@@ -399,7 +429,7 @@ export class OnboardingService {
         pricing: session.review.pricingProfile,
         business: session.review.businessPractices,
         crm: session.review.crmDiscovery,
-        updatedAt: session.updatedAt,
+        updatedAt: finalizedAt,
       }),
       this.options.repo.recordVoiceConsent({
         staffId: session.staffId,
@@ -417,10 +447,23 @@ export class OnboardingService {
           salesStyle: session.review.communicationProfile.salesStyle,
           crm: session.review.crmDiscovery.currentSystem,
         },
-        capturedAt: session.updatedAt,
+        capturedAt: finalizedAt,
       }),
-      this.touchCoordinator(session.id, "finalize", session.status),
     ]);
+
+    session.status = "completed";
+    session.finalizedAt = finalizedAt;
+    session.updatedAt = finalizedAt;
+    session.participantTokenHash = await sha256Hex(createParticipantToken());
+    await this.options.repo.saveSession(session);
+
+    if (invite) {
+      invite.status = "completed";
+      invite.sessionId = session.id;
+      await this.options.repo.saveInvite(invite);
+    }
+
+    await this.touchCoordinator(session.id, "finalize", session.status);
 
     return {
       session: await this.getSessionSummary(session),

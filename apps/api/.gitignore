@@ -1,8 +1,0 @@
-dist/
-node_modules/
-uploads/
-.env
-secrets.local.env
-secrets
-.DS_Store
-*.log

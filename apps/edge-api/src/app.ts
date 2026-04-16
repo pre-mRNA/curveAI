@@ -2,16 +2,32 @@ import { cors } from "hono/cors";
 import { Hono } from "hono";
 import { z, type ZodTypeAny } from "zod";
 import { AiTestStudioRuleError, AiTestStudioService, type AiTestStudioProviders } from "./ai-test-studio-service.js";
-import { getConfig, type EdgeApiEnv } from "./env.js";
-import { classifyRouteFamily, summarizeError, summarizeOrigin, writeLog } from "./logger.js";
-import { OnboardingRuleError, OnboardingService, type ServiceProviders } from "./onboarding-service.js";
-import { MockMicrosoftCalendarAdapter } from "./providers/calendar.js";
 import {
+  getConfig,
+  resolveAiTestProviderConfig,
+  resolveElevenLabsApiKey,
+  resolveReasoningConfig,
+  type EdgeApiEnv,
+} from "./env.js";
+import { classifyRouteFamily, summarizeError, summarizeOrigin, summarizeRequestPath, writeLog } from "./logger.js";
+import { OnboardingRuleError, OnboardingService, type ServiceProviders } from "./onboarding-service.js";
+import {
+  MockMicrosoftCalendarAdapter,
+  createMockMicrosoftAccessToken,
+  createMockMicrosoftAuthorizationCode,
+  defaultMockMicrosoftIdentity,
+  parseMockMicrosoftAccessToken,
+  parseMockMicrosoftAuthorizationCode,
+} from "./providers/calendar.js";
+import {
+  collectToolCalls,
   HttpAiTestJudgeProvider,
   HttpAiTestRunnerProvider,
   MockAiTestJudgeProvider,
   MockAiTestRunnerProvider,
+  WorkerRouteAiTestRunnerProvider,
 } from "./providers/ai-test-studio.js";
+import { MockMessagingProvider, TwilioMessagingProvider, type MessagingProvider } from "./providers/messaging.js";
 import { ElevenLabsRealtimeProvider, MockRealtimeVoiceProvider } from "./providers/realtime.js";
 import { HeuristicReasoningProvider, HttpReasoningProvider } from "./providers/reasoning.js";
 import { HeuristicVoiceCloneProvider } from "./providers/voice-clone.js";
@@ -40,6 +56,7 @@ import {
   onboardingVoiceSampleInputSchema,
   onboardingVoiceTokenInputSchema,
   staffCalendarConnectInputSchema,
+  staffCalendarDisconnectInputSchema,
   staffInviteInputSchema,
   staffOtpVerificationInputSchema,
   staffPricingInterviewInputSchema,
@@ -60,6 +77,9 @@ const ONBOARDING_SESSION_COOKIE = "curve_onboarding_session";
 const defaultMemoryRepo = new InMemoryOnboardingRepository();
 const defaultMemoryObjectStore = new InMemoryObjectStore();
 type OnboardingSessionResult = { session: OnboardingSessionRecord } | { error: Response };
+interface AppProviders extends ServiceProviders {
+  messaging: MessagingProvider;
+}
 
 function parseCookies(request: Request): Record<string, string> {
   const cookieHeader = request.headers.get("cookie");
@@ -89,8 +109,32 @@ function getBearerToken(request: Request): string | undefined {
   return undefined;
 }
 
+function getBasicAuth(request: Request): { username: string; password: string } | undefined {
+  const authorization = request.headers.get("authorization");
+  if (!authorization) {
+    return undefined;
+  }
+  const [scheme, credentials] = authorization.split(/\s+/, 2);
+  if (!scheme || !/^basic$/i.test(scheme) || !credentials) {
+    return undefined;
+  }
+  try {
+    const decoded = atob(credentials);
+    const separator = decoded.indexOf(":");
+    if (separator < 0) {
+      return undefined;
+    }
+    return {
+      username: decoded.slice(0, separator),
+      password: decoded.slice(separator + 1),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function getAdminAccessToken(request: Request): string | undefined {
-  return getBearerToken(request) ?? request.headers.get("x-admin-token") ?? undefined;
+  return getBearerToken(request);
 }
 
 function sessionCookieNames(baseName: string): string[] {
@@ -100,8 +144,6 @@ function sessionCookieNames(baseName: string): string[] {
 function getStaffAccessToken(request: Request): string | undefined {
   const cookies = parseCookies(request);
   return (
-    getBearerToken(request) ??
-    request.headers.get("x-staff-session") ??
     sessionCookieNames(STAFF_SESSION_COOKIE).map((name) => cookies[name]).find(Boolean) ??
     undefined
   );
@@ -110,8 +152,6 @@ function getStaffAccessToken(request: Request): string | undefined {
 function getOnboardingAccessToken(request: Request): string | undefined {
   const cookies = parseCookies(request);
   return (
-    getBearerToken(request) ??
-    request.headers.get("x-onboarding-token") ??
     sessionCookieNames(ONBOARDING_SESSION_COOKIE).map((name) => cookies[name]).find(Boolean) ??
     undefined
   );
@@ -140,12 +180,39 @@ function requestOrigin(request: Request): string | undefined {
   return request.headers.get("origin") ?? undefined;
 }
 
+function isLocalOrigin(origin: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+function hasCookieBackedBrowserSession(request: Request): boolean {
+  return Boolean(getStaffAccessToken(request) || getOnboardingAccessToken(request));
+}
+
 function isAllowedBrowserOrigin(request: Request, allowedOrigins: string[]): boolean {
   const origin = requestOrigin(request);
   if (!origin) {
+    if (isLocalRequest(request.url)) {
+      return true;
+    }
+    return !hasCookieBackedBrowserSession(request);
+  }
+  if (isLocalRequest(request.url) && isLocalOrigin(origin)) {
     return true;
   }
   return allowedOrigins.includes(origin);
+}
+
+function resolveCorsOrigin(origin: string | undefined, requestUrl: string, allowedOrigins: string[]): string | undefined {
+  if (!origin) {
+    return undefined;
+  }
+  if (allowedOrigins.includes(origin)) {
+    return origin;
+  }
+  if (isLocalRequest(requestUrl) && isLocalOrigin(origin)) {
+    return origin;
+  }
+  return undefined;
 }
 
 function parseValidation<TSchema extends ZodTypeAny>(schema: TSchema, input: unknown): { data?: z.output<TSchema>; issues?: Array<{ path: string; message: string }> } {
@@ -184,8 +251,17 @@ function sanitizeStaff(staff: StaffRecord | undefined) {
     authExpiresAt,
     ...safeStaff
   } = staff;
+  const safeCalendarConnection = safeStaff.calendarConnection
+    ? {
+        ...safeStaff.calendarConnection,
+        authState: undefined,
+        accessToken: undefined,
+        refreshToken: undefined,
+      }
+    : undefined;
   return {
     ...safeStaff,
+    calendarConnection: safeCalendarConnection,
     otpIssuedAt,
     otpFailedAttempts,
     otpVerifiedAt,
@@ -220,15 +296,70 @@ function isExpiredUploadRequest(upload: { expiresAt: string }): boolean {
   return new Date(upload.expiresAt).getTime() < Date.now();
 }
 
-function toPublicUploadSummary(upload: {
-  fileCount: number;
-  status: string;
-  expiresAt: string;
-}) {
+function publicJobSummary(jobSummary?: string, issue?: string, requestNote?: string): string | undefined {
+  const candidate = jobSummary?.trim() || issue?.trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  const normalizedCandidate = candidate.toLowerCase();
+  const normalizedNote = requestNote?.trim().toLowerCase();
+  if (
+    normalizedCandidate === normalizedNote ||
+    normalizedCandidate === "customer photo upload requested." ||
+    normalizedCandidate === "photo upload requested from voice tooling."
+  ) {
+    return undefined;
+  }
+
+  return candidate;
+}
+
+function buildPhotoUploadSmsBody(input: {
+  uploadLink: string;
+  jobSummary?: string;
+  requestNote?: string;
+  requestedBy?: string;
+}): string {
+  const lines = ["Please upload photos for your job using this secure link:"];
+  if (input.jobSummary) {
+    lines.push(`Job: ${input.jobSummary}`);
+  }
+  if (input.requestNote) {
+    lines.push(`What to show: ${input.requestNote}`);
+  }
+  if (input.requestedBy) {
+    lines.push(`Requested by: ${input.requestedBy}`);
+  }
+  lines.push(input.uploadLink);
+  return lines.join("\n");
+}
+
+async function toPublicUploadSummary(
+  repo: OnboardingRepository,
+  upload: {
+    fileCount: number;
+    status: string;
+    expiresAt: string;
+    jobId?: string;
+    staffId?: string;
+    notes?: string;
+  },
+) {
+  const [staff, jobCard] = await Promise.all([
+    upload.staffId ? repo.getStaff(upload.staffId) : Promise.resolve(undefined),
+    upload.jobId ? repo.getJobCard(upload.jobId) : Promise.resolve(undefined),
+  ]);
+
   return {
     fileCount: upload.fileCount,
     status: upload.status,
     expiresAt: upload.expiresAt,
+    requestedBy: staff?.fullName,
+    businessName: staff?.companyName,
+    siteLabel: jobCard?.job.address ?? jobCard?.job.location?.label ?? jobCard?.job.location?.suburb,
+    jobSummary: publicJobSummary(jobCard?.job.summary, jobCard?.job.issue, upload.notes),
+    requestNote: upload.notes,
   };
 }
 
@@ -459,22 +590,26 @@ async function signJobCardEnvelope(card: JobCardEnvelope): Promise<JobCardEnvelo
   };
 }
 
-function buildProviders(env: EdgeApiEnv): ServiceProviders {
+function buildProviders(env: EdgeApiEnv): AppProviders {
   const heuristicReasoning = new HeuristicReasoningProvider();
+  const elevenLabsApiKey = resolveElevenLabsApiKey(env);
+  const reasoning = resolveReasoningConfig(env);
   return {
     realtimeVoice:
-      env.ELEVENLABS_API_KEY && env.ELEVENLABS_AGENT_ID
+      elevenLabsApiKey && env.ELEVENLABS_AGENT_ID
         ? new ElevenLabsRealtimeProvider({
-            apiKey: env.ELEVENLABS_API_KEY,
+            apiKey: elevenLabsApiKey,
             agentId: env.ELEVENLABS_AGENT_ID,
+            baseUrl: env.ELEVENLABS_BASE_URL,
           })
         : new MockRealtimeVoiceProvider(),
     reasoning:
-      env.REASONING_BASE_URL && env.REASONING_API_KEY
+      reasoning.mode !== "mock" && reasoning.baseUrl && reasoning.apiKey
         ? new HttpReasoningProvider({
-            baseUrl: env.REASONING_BASE_URL,
-            apiKey: env.REASONING_API_KEY,
-            mode: (env.REASONING_PROVIDER ?? "").toLowerCase() === "openai-compatible" ? "openai-compatible" : "hosted",
+            baseUrl: reasoning.baseUrl,
+            apiKey: reasoning.apiKey,
+            model: reasoning.model,
+            mode: reasoning.mode,
             fallback: heuristicReasoning,
           })
         : heuristicReasoning,
@@ -483,37 +618,295 @@ function buildProviders(env: EdgeApiEnv): ServiceProviders {
       clientId: env.MICROSOFT_CLIENT_ID,
       clientSecret: env.MICROSOFT_CLIENT_SECRET,
       redirectUri: env.MICROSOFT_REDIRECT_URI,
+      authBaseUrl: env.MICROSOFT_AUTH_BASE_URL,
       graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
     }),
     voiceClone: new HeuristicVoiceCloneProvider(),
+    messaging:
+      env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER
+        ? new TwilioMessagingProvider({
+            accountSid: env.TWILIO_ACCOUNT_SID,
+            authToken: env.TWILIO_AUTH_TOKEN,
+            fromNumber: env.TWILIO_FROM_NUMBER,
+            baseUrl: env.TWILIO_BASE_URL,
+          })
+        : new MockMessagingProvider(),
   };
 }
 
-function buildAiTestProviders(env: EdgeApiEnv): AiTestStudioProviders {
+function buildAiTestProviders(
+  env: EdgeApiEnv,
+  options?: {
+    runWorkerRouteCase?: (input: {
+      testCase: Parameters<AiTestStudioProviders["runner"]["runCase"]>[0]["testCase"];
+      operatorNotes?: string;
+    }) => Promise<ReturnType<AiTestStudioProviders["runner"]["runCase"]> extends Promise<infer T> ? T : never>;
+  },
+): AiTestStudioProviders {
   const mockRunner = new MockAiTestRunnerProvider();
   const mockJudge = new MockAiTestJudgeProvider();
-  const runnerMode = (env.AI_TEST_RUNNER_PROVIDER ?? "").trim().toLowerCase() === "openai-compatible" ? "openai-compatible" : "hosted";
-  const judgeMode = (env.AI_TEST_JUDGE_PROVIDER ?? "").trim().toLowerCase() === "openai-compatible" ? "openai-compatible" : "hosted";
+  const runner = resolveAiTestProviderConfig(env, "runner");
+  const judge = resolveAiTestProviderConfig(env, "judge");
+  const baseRunner =
+    runner.mode !== "mock" && runner.baseUrl && runner.apiKey
+      ? new HttpAiTestRunnerProvider({
+          baseUrl: runner.baseUrl,
+          apiKey: runner.apiKey,
+          model: runner.model,
+          mode: runner.mode,
+          fallback: mockRunner,
+        })
+      : mockRunner;
 
   return {
-    runner:
-      env.AI_TEST_RUNNER_BASE_URL && env.AI_TEST_RUNNER_API_KEY
-        ? new HttpAiTestRunnerProvider({
-            baseUrl: env.AI_TEST_RUNNER_BASE_URL,
-            apiKey: env.AI_TEST_RUNNER_API_KEY,
-            mode: runnerMode,
-            fallback: mockRunner,
-          })
-        : mockRunner,
+    runner: options?.runWorkerRouteCase
+      ? new WorkerRouteAiTestRunnerProvider({
+          fallback: baseRunner,
+          runWorkerRouteCase: options.runWorkerRouteCase,
+        })
+      : baseRunner,
     judge:
-      env.AI_TEST_JUDGE_BASE_URL && env.AI_TEST_JUDGE_API_KEY
+      judge.mode !== "mock" && judge.baseUrl && judge.apiKey
         ? new HttpAiTestJudgeProvider({
-            baseUrl: env.AI_TEST_JUDGE_BASE_URL,
-            apiKey: env.AI_TEST_JUDGE_API_KEY,
-            mode: judgeMode,
+            baseUrl: judge.baseUrl,
+            apiKey: judge.apiKey,
+            model: judge.model,
+            mode: judge.mode,
             fallback: mockJudge,
           })
         : mockJudge,
+  };
+}
+
+async function createAutomationHeaders(secret: string, path: string, body: unknown) {
+  const rawBody = JSON.stringify(body);
+  const timestamp = Date.now().toString();
+  const signature = await signHmacSha256(secret, `${timestamp}.POST.${path}.${rawBody}`);
+  return {
+    rawBody,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Curve-Timestamp": timestamp,
+      "X-Curve-Signature": `sha256=${signature}`,
+    } satisfies HeadersInit,
+  };
+}
+
+async function runWorkerRouteAiTestCase(input: {
+  env: EdgeApiEnv;
+  testCase: { target: string; systemPrompt?: string; userPrompt: string; tags: string[] };
+  operatorNotes?: string;
+}) {
+  const fallbackRunner = new MockAiTestRunnerProvider();
+  const combinedPrompt = `${input.testCase.systemPrompt ?? ""}\n${input.testCase.userPrompt}\n${input.operatorNotes ?? ""}`;
+  const toolCalls = collectToolCalls(combinedPrompt.toLowerCase());
+  if (!toolCalls.length) {
+    return {
+      ...(await fallbackRunner.runCase({
+        testCase: input.testCase as Parameters<MockAiTestRunnerProvider["runCase"]>[0]["testCase"],
+        operatorNotes: input.operatorNotes,
+      })),
+      fallbackUsed: true,
+      fallbackReason: "No worker-route tool path matched this prompt.",
+    };
+  }
+
+  const repo = new InMemoryOnboardingRepository();
+  const objectStore = new InMemoryObjectStore();
+  const startedAt = Date.now();
+  const now = new Date().toISOString();
+  const staffId = createId("staff");
+  const jobId = createId("job");
+  const callerPhone = "+61412345678";
+
+  await repo.upsertStaffProfile({
+    staffId,
+    fullName: "AI Harness Staff",
+    email: "harness@curve.test",
+    phoneNumber: callerPhone,
+    role: "Field tech",
+    timezone: "Australia/Sydney",
+    companyName: "Curve AI Test",
+    calendarProvider: "outlook",
+    communication: undefined,
+    pricing: undefined,
+    business: undefined,
+    crm: undefined,
+    updatedAt: now,
+  });
+  await repo.saveStaffCalendarConnection({
+    staffId,
+    provider: "outlook",
+    status: "connected",
+    accountEmail: "harness@curve.test",
+    calendarId: "primary",
+    calendarLabel: "Primary",
+    timezone: "Australia/Sydney",
+    connectedAt: now,
+    updatedAt: now,
+  });
+
+  const harnessApp = createApp({
+    env: input.env,
+    repo,
+    objectStore,
+    providers: {
+      realtimeVoice: new MockRealtimeVoiceProvider(),
+      reasoning: new HeuristicReasoningProvider(),
+      calendar: new MockMicrosoftCalendarAdapter(),
+      voiceClone: new HeuristicVoiceCloneProvider(),
+      messaging: new MockMessagingProvider(),
+    },
+    aiTestProviders: {
+      runner: fallbackRunner,
+      judge: new MockAiTestJudgeProvider(),
+    },
+  });
+
+  const observedEffects: string[] = [];
+  const outputFragments: string[] = [];
+  const issue =
+    /photo|image|upload/i.test(combinedPrompt)
+      ? "Customer needs to upload job photos."
+      : /quote|price|pricing/i.test(combinedPrompt)
+        ? "Customer wants a price estimate."
+        : /appointment|book|schedule/i.test(combinedPrompt)
+          ? "Customer wants a booked visit."
+          : "Customer needs a follow-up.";
+
+  const contextBody = {
+    jobId,
+    staffId,
+    callerPhone,
+    callerName: "Avery Customer",
+    customerName: "Avery Customer",
+    address: "12 Test Street, Sydney NSW",
+    suburb: "Surry Hills",
+    state: "NSW",
+    postcode: "2010",
+    issue,
+    summary: issue,
+  };
+  const contextRequest = await createAutomationHeaders(input.env.AUTOMATION_SHARED_SECRET ?? "automation-secret", "/voice/context", contextBody);
+  const contextResponse = await harnessApp.request("/voice/context", {
+    method: "POST",
+    headers: contextRequest.headers,
+    body: contextRequest.rawBody,
+  });
+  if (!contextResponse.ok) {
+    throw new Error(`Worker-route context bootstrap failed with ${contextResponse.status}`);
+  }
+  observedEffects.push(`Loaded context for job ${jobId}.`);
+
+  for (const tool of toolCalls) {
+    if (tool === "quote") {
+      const body = {
+        ...contextBody,
+        hours: 2,
+        materialsEstimate: 120,
+        rush: /rush|urgent|emergency/i.test(combinedPrompt),
+      };
+      const request = await createAutomationHeaders(input.env.AUTOMATION_SHARED_SECRET ?? "automation-secret", "/voice/tools/quote", body);
+      const response = await harnessApp.request("/voice/tools/quote", {
+        method: "POST",
+        headers: request.headers,
+        body: request.rawBody,
+      });
+      if (!response.ok) {
+        throw new Error(`Worker-route quote execution failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { quote?: { amount?: number; id?: string } };
+      observedEffects.push(`Created quote ${payload.quote?.id ?? "unknown"} for job ${jobId}.`);
+      outputFragments.push(`Quoted the job at ${payload.quote?.amount ?? "an unknown amount"} AUD.`);
+      continue;
+    }
+    if (tool === "callback") {
+      const body = {
+        jobId,
+        staffId,
+        callerPhone,
+        reason: "Customer requested a callback after hours.",
+        notes: "AI test harness callback",
+      };
+      const request = await createAutomationHeaders(input.env.AUTOMATION_SHARED_SECRET ?? "automation-secret", "/voice/tools/callback", body);
+      const response = await harnessApp.request("/voice/tools/callback", {
+        method: "POST",
+        headers: request.headers,
+        body: request.rawBody,
+      });
+      if (!response.ok) {
+        throw new Error(`Worker-route callback execution failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { callback?: { id?: string; dueAt?: string } };
+      observedEffects.push(`Queued callback ${payload.callback?.id ?? "unknown"} for job ${jobId}.`);
+      outputFragments.push(`Queued a callback for the customer.`);
+      continue;
+    }
+    if (tool === "appointment") {
+      const startAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const endAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      const body = {
+        jobId,
+        staffId,
+        callerPhone,
+        startAt,
+        endAt,
+        timezone: "Australia/Sydney",
+        location: "12 Test Street, Sydney NSW",
+        notes: "AI test harness appointment",
+      };
+      const request = await createAutomationHeaders(input.env.AUTOMATION_SHARED_SECRET ?? "automation-secret", "/voice/tools/appointment", body);
+      const response = await harnessApp.request("/voice/tools/appointment", {
+        method: "POST",
+        headers: request.headers,
+        body: request.rawBody,
+      });
+      if (!response.ok) {
+        throw new Error(`Worker-route appointment execution failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { appointment?: { status?: string; id?: string }; calendarSync?: { status?: string } };
+      observedEffects.push(`Booked appointment ${payload.appointment?.id ?? "unknown"} with calendar status ${payload.calendarSync?.status ?? "unknown"}.`);
+      outputFragments.push(`Booked the visit into the staff calendar.`);
+      continue;
+    }
+    if (tool === "send-photo-link") {
+      const body = {
+        jobId,
+        staffId,
+        callerPhone,
+        notes: "Please send clear photos of the problem area.",
+      };
+      const request = await createAutomationHeaders(input.env.AUTOMATION_SHARED_SECRET ?? "automation-secret", "/voice/tools/send-photo-link", body);
+      const response = await harnessApp.request("/voice/tools/send-photo-link", {
+        method: "POST",
+        headers: request.headers,
+        body: request.rawBody,
+      });
+      if (!response.ok) {
+        throw new Error(`Worker-route photo-link execution failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { upload?: { uploadLink?: string }; delivery?: { status?: string } };
+      observedEffects.push(`Issued upload link for job ${jobId} with delivery status ${payload.delivery?.status ?? "queued"}.`);
+      outputFragments.push(`Sent the customer a secure photo upload link.`);
+      continue;
+    }
+    if (tool === "end_call") {
+      observedEffects.push("Ended the call after confirming the next step.");
+      outputFragments.push("I can end the call cleanly once the next step is confirmed.");
+    }
+  }
+
+  return {
+    provider: "worker-route-harness",
+    mode: "mock" as const,
+    model: "worker-route-v1",
+    outputText: outputFragments.join(" "),
+    toolCalls,
+    executionMode: "worker-route" as const,
+    observedEffects,
+    latencyMs: Math.max(1, Date.now() - startedAt),
+    fallbackUsed: false,
+    fallbackReason: undefined,
   };
 }
 
@@ -521,7 +914,7 @@ export function createApp(options?: {
   env?: EdgeApiEnv;
   repo?: OnboardingRepository;
   objectStore?: ObjectStore;
-  providers?: ServiceProviders;
+  providers?: AppProviders;
   aiTestProviders?: AiTestStudioProviders;
 }) {
   const env = options?.env ?? {};
@@ -535,11 +928,26 @@ export function createApp(options?: {
   const repo = options?.repo ?? (env.DB ? new D1OnboardingRepository(env.DB) : defaultMemoryRepo);
   const objectStore = options?.objectStore ?? (env.ARTIFACTS_BUCKET ? new R2ObjectStore(env.ARTIFACTS_BUCKET) : defaultMemoryObjectStore);
   const providers = options?.providers ?? buildProviders(env);
-  const aiTestProviders = options?.aiTestProviders ?? buildAiTestProviders(env);
+  const app = new Hono<AppBindings>();
+  const aiTestProviders =
+    options?.aiTestProviders ??
+    buildAiTestProviders(env, {
+      runWorkerRouteCase: (input) =>
+        runWorkerRouteAiTestCase({
+          env,
+          testCase: input.testCase,
+          operatorNotes: input.operatorNotes,
+        }),
+    });
   const onboardingService = new OnboardingService({
     repo,
     config,
-    providers,
+    providers: {
+      realtimeVoice: providers.realtimeVoice,
+      reasoning: providers.reasoning,
+      calendar: providers.calendar,
+      voiceClone: providers.voiceClone,
+    },
     objectStore,
     coordinatorNamespace: env.ONBOARDING_SESSIONS,
   });
@@ -547,8 +955,6 @@ export function createApp(options?: {
     repo,
     providers: aiTestProviders,
   });
-
-  const app = new Hono<AppBindings>();
 
   function hasAdminAccess(request: Request): boolean {
     const token = getAdminAccessToken(request);
@@ -610,8 +1016,8 @@ export function createApp(options?: {
   );
 
   app.use("*", cors({
-    origin: config.allowedOrigins.length === 1 ? config.allowedOrigins[0] : config.allowedOrigins,
-    allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Staff-Session", "X-Onboarding-Token", "X-Curve-Signature", "X-Curve-Timestamp"],
+    origin: (origin, c) => resolveCorsOrigin(origin, c.req.raw.url, config.allowedOrigins) ?? "",
+    allowHeaders: ["Content-Type", "Authorization", "X-Curve-Signature", "X-Curve-Timestamp"],
     allowMethods: ["GET", "POST", "OPTIONS"],
     credentials: true,
   }));
@@ -639,7 +1045,7 @@ export function createApp(options?: {
     writeLog(level, "request.completed", {
       requestId,
       method: c.req.method,
-      path: c.req.path,
+      path: summarizeRequestPath(c.req.path),
       routeFamily: classifyRouteFamily(c.req.path),
       status,
       durationMs: Date.now() - startedAt,
@@ -657,6 +1063,13 @@ export function createApp(options?: {
       await next();
     };
 
+  const requireMockProviderAccess = async (c: any, next: () => Promise<void>) => {
+    if (!isLocalRequest(c.req.url) && !hasAdminAccess(c.req.raw)) {
+      return jsonError(c, 404, "Not found");
+    }
+    await next();
+  };
+
   app.use("/dashboard", requireBrowserOrigin(opsOrigins));
   app.use("/ai-test-studio/*", requireBrowserOrigin(opsOrigins));
   app.use("/staff/*", requireBrowserOrigin(staffOrigins));
@@ -667,6 +1080,7 @@ export function createApp(options?: {
   app.use("/assets/*", requireBrowserOrigin(staffOrigins));
   app.use("/onboarding/*", requireBrowserOrigin(onboardingOrigins));
   app.use("/uploads/*", requireBrowserOrigin(uploadOrigins));
+  app.use("/mock/providers/*", requireMockProviderAccess);
 
   app.use("*", async (c, next) => {
     if (c.req.method === "OPTIONS") {
@@ -677,12 +1091,12 @@ export function createApp(options?: {
       await next();
       return;
     }
-    if (config.warnings.length > 0 && !isLocalRequest(c.req.url)) {
+    if (config.blockingIssues.length > 0 && !isLocalRequest(c.req.url)) {
       return jsonError(
         c,
         503,
         "Worker configuration is incomplete",
-        hasAdminAccess(c.req.raw) ? { issues: config.warnings } : undefined,
+        hasAdminAccess(c.req.raw) ? { issues: config.blockingIssues } : undefined,
       );
     }
     await next();
@@ -698,7 +1112,7 @@ export function createApp(options?: {
     writeLog(status >= 500 ? "error" : "warn", "request.failed", {
       requestId,
       method: c.req.method,
-      path: c.req.path,
+      path: summarizeRequestPath(c.req.path),
       routeFamily: classifyRouteFamily(c.req.path),
       status,
       durationMs: typeof startedAt === "number" ? Date.now() - startedAt : undefined,
@@ -850,21 +1264,180 @@ export function createApp(options?: {
     c.json(
       hasAdminAccess(c.req.raw) || isLocalRequest(c.req.url)
         ? {
-            ok: config.warnings.length === 0,
-            ready: config.warnings.length === 0,
+            ok: config.blockingIssues.length === 0,
+            ready: config.blockingIssues.length === 0,
             runtime: "cloudflare-worker",
             realtimeVoice: providers.realtimeVoice.mode,
             reasoning: providers.reasoning.mode,
             calendar: providers.calendar.mode,
-            warnings: config.warnings,
+            messaging: providers.messaging.mode,
+            blockingIssues: config.blockingIssues,
+            advisoryIssues: config.advisoryIssues,
           }
         : {
-            ok: config.warnings.length === 0,
-            ready: config.warnings.length === 0,
+            ok: config.blockingIssues.length === 0,
+            ready: config.blockingIssues.length === 0,
             runtime: "cloudflare-worker",
+            messaging: providers.messaging.mode,
           },
     ),
   );
+
+  app.get("/mock/providers/elevenlabs/v1/convai/conversation/get-signed-url", (c) => {
+    const agentId = c.req.query("agent_id")?.trim() || "mock-agent";
+    return c.json({
+      signed_url: `wss://mock.elevenlabs.local/convai/${encodeURIComponent(agentId)}?session=${encodeURIComponent(createParticipantToken())}`,
+      provider: "elevenlabs",
+      mode: "mock",
+    });
+  });
+
+  app.get("/mock/providers/microsoft/authorize", (c) => {
+    const redirectUri = c.req.query("redirect_uri");
+    const state = c.req.query("state");
+    if (!redirectUri || !state) {
+      return jsonError(c, 400, "redirect_uri and state are required");
+    }
+    let redirectOrigin: string;
+    try {
+      redirectOrigin = new URL(redirectUri).origin;
+    } catch {
+      return jsonError(c, 400, "redirect_uri is invalid");
+    }
+    const allowedRedirectOrigins = [config.publicApiUrl]
+      .map((value) => {
+        try {
+          return new URL(value).origin;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((value): value is string => Boolean(value));
+    if (!(isLocalRequest(c.req.url) && isLocalOrigin(redirectOrigin)) && !allowedRedirectOrigins.includes(redirectOrigin)) {
+      return jsonError(c, 400, "redirect_uri is not allowed");
+    }
+
+    const identity = {
+      ...defaultMockMicrosoftIdentity(c.req.query("staff_name") ?? "Curve AI Staff"),
+      accountEmail: c.req.query("email")?.trim() || defaultMockMicrosoftIdentity(c.req.query("staff_name") ?? "Curve AI Staff").accountEmail,
+      calendarId: c.req.query("calendar_id")?.trim() || defaultMockMicrosoftIdentity(c.req.query("staff_name") ?? "Curve AI Staff").calendarId,
+      calendarLabel: c.req.query("calendar")?.trim() || defaultMockMicrosoftIdentity(c.req.query("staff_name") ?? "Curve AI Staff").calendarLabel,
+    };
+    const callbackUrl = new URL(redirectUri);
+    callbackUrl.searchParams.set("state", state);
+    callbackUrl.searchParams.set("code", createMockMicrosoftAuthorizationCode(identity));
+    callbackUrl.searchParams.set("email", identity.accountEmail);
+    callbackUrl.searchParams.set("calendar", identity.calendarLabel);
+    return c.redirect(callbackUrl.toString(), 302);
+  });
+
+  app.post("/mock/providers/microsoft/token", async (c) => {
+    const form = await c.req.parseBody();
+    const grantType = typeof form.grant_type === "string" ? form.grant_type : "authorization_code";
+    const identity =
+      grantType === "refresh_token"
+        ? typeof form.refresh_token === "string"
+          ? parseMockMicrosoftAccessToken(form.refresh_token)
+          : undefined
+        : typeof form.code === "string"
+          ? parseMockMicrosoftAuthorizationCode(form.code)
+          : undefined;
+    if (!identity) {
+      return jsonError(c, 400, "Mock Microsoft authorization code is invalid");
+    }
+
+    return c.json({
+      token_type: "Bearer",
+      access_token: createMockMicrosoftAccessToken(identity),
+      refresh_token: createMockMicrosoftAccessToken(identity),
+      expires_in: 3600,
+    });
+  });
+
+  app.get("/mock/providers/microsoft/v1.0/me", (c) => {
+    const accessToken = getBearerToken(c.req.raw);
+    const identity = parseMockMicrosoftAccessToken(accessToken);
+    if (!identity) {
+      return jsonError(c, 401, "Mock Microsoft bearer token is required");
+    }
+
+    return c.json({
+      mail: identity.accountEmail,
+      userPrincipalName: identity.accountEmail,
+      displayName: identity.displayName ?? identity.accountEmail.split("@")[0],
+    });
+  });
+
+  app.get("/mock/providers/microsoft/v1.0/me/calendar", (c) => {
+    const accessToken = getBearerToken(c.req.raw);
+    const identity = parseMockMicrosoftAccessToken(accessToken);
+    if (!identity) {
+      return jsonError(c, 401, "Mock Microsoft bearer token is required");
+    }
+
+    return c.json({
+      id: identity.calendarId ?? "primary",
+      name: identity.calendarLabel,
+    });
+  });
+
+  app.post("/mock/providers/microsoft/v1.0/me/events", async (c) => {
+    return handleMockMicrosoftEventCreate(c);
+  });
+
+  app.post("/mock/providers/microsoft/v1.0/me/calendars/:calendarId/events", async (c) => {
+    return handleMockMicrosoftEventCreate(c);
+  });
+
+  async function handleMockMicrosoftEventCreate(c: any) {
+    const accessToken = getBearerToken(c.req.raw);
+    const identity = parseMockMicrosoftAccessToken(accessToken);
+    if (!identity) {
+      return jsonError(c, 401, "Mock Microsoft bearer token is required");
+    }
+
+    const body = await c.req.json().catch(() => ({})) as {
+      subject?: string;
+      start?: { dateTime?: string; timeZone?: string };
+      end?: { dateTime?: string; timeZone?: string };
+      location?: { displayName?: string };
+      body?: { content?: string };
+    };
+
+    return c.json({
+      id: `event_${createParticipantToken().slice(0, 12)}`,
+      webLink: `https://mock.microsoft.local/calendar/${encodeURIComponent(identity.accountEmail)}`,
+      subject: body.subject ?? "Curve AI appointment",
+      start: body.start,
+      end: body.end,
+      location: body.location,
+      body: body.body,
+    });
+  }
+
+  app.post("/mock/providers/twilio/2010-04-01/Accounts/:accountSid/Messages.json", async (c) => {
+    const auth = getBasicAuth(c.req.raw);
+    const accountSid = c.req.param("accountSid");
+    if (!auth || auth.username !== accountSid) {
+      return jsonError(c, 401, "Mock Twilio basic auth is required");
+    }
+
+    const form = await c.req.parseBody();
+    const to = typeof form.To === "string" ? form.To : undefined;
+    const from = typeof form.From === "string" ? form.From : undefined;
+    const body = typeof form.Body === "string" ? form.Body : undefined;
+    if (!to || !from || !body) {
+      return jsonError(c, 400, "Mock Twilio message requires To, From, and Body");
+    }
+
+    return c.json({
+      sid: `SM${createParticipantToken().slice(0, 16)}`,
+      status: "queued",
+      to,
+      from,
+      body,
+    });
+  });
 
   app.get("/dashboard", async (c) => {
     const authError = await requireAdmin(c);
@@ -1263,7 +1836,153 @@ export function createApp(options?: {
     });
   });
 
+  app.get("/staff/calendar/microsoft/start", async (c) => {
+    const staffId = c.req.query("staffId");
+    if (!staffId) {
+      return jsonError(c, 400, "staffId is required");
+    }
+    const access = await requireStaffAccess(c, staffId);
+    if (access.error) {
+      return access.error;
+    }
+    const staff = await repo.getStaff(staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    const started = await providers.calendar.startAuth({
+      staffName: staff.fullName,
+      publicApiUrl: config.publicApiUrl,
+      redirectUri: `${config.publicApiUrl.replace(/\/$/, "")}/staff/calendar/microsoft/callback`,
+    });
+    const now = new Date().toISOString();
+    await repo.saveStaffCalendarConnection({
+      staffId,
+      provider: "outlook",
+      status: started.status,
+      accountEmail: staff.calendarConnection?.accountEmail,
+      calendarId: staff.calendarConnection?.calendarId,
+      calendarLabel: staff.calendarConnection?.calendarLabel,
+      timezone: staff.calendarConnection?.timezone ?? staff.timezone,
+      authState: started.authState,
+      accessToken: undefined,
+      refreshToken: undefined,
+      tokenExpiresAt: undefined,
+      lastError: undefined,
+      connectedAt: staff.calendarConnection?.connectedAt,
+      updatedAt: now,
+    });
+    if (!started.authUrl) {
+      return jsonError(c, 500, "Microsoft calendar authorization is unavailable");
+    }
+    return c.redirect(started.authUrl, 302);
+  });
+
+  app.get("/staff/calendar/microsoft/callback", async (c) => {
+    const state = c.req.query("state");
+    if (!state) {
+      return jsonError(c, 400, "state is required");
+    }
+    const staff = await repo.getStaffByCalendarAuthState(state);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    try {
+      const completed = await providers.calendar.completeAuth({
+        state,
+        code: c.req.query("code"),
+        accountEmail: c.req.query("email"),
+        calendarLabel: c.req.query("calendar"),
+        redirectUri: `${config.publicApiUrl.replace(/\/$/, "")}/staff/calendar/microsoft/callback`,
+      });
+      const now = new Date().toISOString();
+      await repo.saveStaffCalendarConnection({
+        staffId: staff.id,
+        provider: "outlook",
+        status: completed.summary.status,
+        accountEmail: completed.summary.accountEmail,
+        calendarId: completed.summary.calendarId,
+        calendarLabel: completed.summary.calendarLabel,
+        timezone: staff.calendarConnection?.timezone ?? staff.timezone,
+        authState: undefined,
+        accessToken: completed.credential?.accessToken,
+        refreshToken: completed.credential?.refreshToken,
+        tokenExpiresAt: completed.credential?.tokenExpiresAt,
+        lastError: undefined,
+        connectedAt: completed.summary.connectedAt ?? now,
+        updatedAt: now,
+      });
+      const redirectUrl = new URL("/", config.publicStaffAppUrl);
+      redirectUrl.searchParams.set("calendar", completed.summary.status);
+      return c.redirect(redirectUrl.toString(), 302);
+    } catch (error) {
+      const now = new Date().toISOString();
+      await repo.saveStaffCalendarConnection({
+        staffId: staff.id,
+        provider: "outlook",
+        status: "error",
+        accountEmail: staff.calendarConnection?.accountEmail,
+        calendarId: staff.calendarConnection?.calendarId,
+        calendarLabel: staff.calendarConnection?.calendarLabel,
+        timezone: staff.calendarConnection?.timezone ?? staff.timezone,
+        authState: undefined,
+        accessToken: undefined,
+        refreshToken: undefined,
+        tokenExpiresAt: undefined,
+        lastError: error instanceof Error ? error.message : "Microsoft calendar connection failed",
+        connectedAt: staff.calendarConnection?.connectedAt,
+        updatedAt: now,
+      });
+      const redirectUrl = new URL("/", config.publicStaffAppUrl);
+      redirectUrl.searchParams.set("calendar", "error");
+      return c.redirect(redirectUrl.toString(), 302);
+    }
+  });
+
+  app.get("/staff/calendar/status", async (c) => {
+    const staffId = c.req.query("staffId");
+    if (!staffId) {
+      return jsonError(c, 400, "staffId is required");
+    }
+    const access = await requireStaffAccess(c, staffId);
+    if (access.error) {
+      return access.error;
+    }
+    const staff = await repo.getStaff(staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      calendarConnection: sanitizeStaff(staff)?.calendarConnection,
+    });
+  });
+
+  app.post("/staff/calendar/disconnect", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = parseValidation(staffCalendarDisconnectInputSchema, body);
+    if (!parsed.data) {
+      return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
+    }
+    const access = await requireStaffAccess(c, parsed.data.staffId);
+    if (access.error) {
+      return access.error;
+    }
+    await repo.deleteStaffCalendarConnection(parsed.data.staffId);
+    const staff = await repo.getStaff(parsed.data.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+    return c.json({
+      ok: true,
+      staff: sanitizeStaff(staff),
+      disconnected: true,
+    });
+  });
+
   app.post("/staff/calendar/connect", async (c) => {
+    if (!isLocalRequest(c.req.url)) {
+      return jsonError(c, 400, "Manual calendar connection is only available in local development");
+    }
     const body = await c.req.json().catch(() => ({}));
     const parsed = parseValidation(staffCalendarConnectInputSchema, body);
     if (!parsed.data) {
@@ -1277,10 +1996,16 @@ export function createApp(options?: {
     const calendarConnection = await repo.saveStaffCalendarConnection({
       staffId: parsed.data.staffId,
       provider: parsed.data.provider,
+      status: "connected",
       accountEmail: parsed.data.accountEmail,
       calendarId: parsed.data.calendarId,
+      calendarLabel: parsed.data.calendarLabel,
       timezone: parsed.data.timezone,
-      externalConnectionId: parsed.data.externalConnectionId,
+      authState: undefined,
+      accessToken: undefined,
+      refreshToken: undefined,
+      tokenExpiresAt: undefined,
+      lastError: undefined,
       connectedAt: now,
       updatedAt: now,
     });
@@ -1291,7 +2016,7 @@ export function createApp(options?: {
     return c.json({
       ok: true,
       staff: sanitizeStaff(staff),
-      calendarConnection,
+      calendarConnection: sanitizeStaff({ ...staff, calendarConnection })?.calendarConnection,
     });
   });
 
@@ -1328,33 +2053,38 @@ export function createApp(options?: {
     if (!parsed.data) {
       return jsonError(c, 400, "Invalid request payload", { issues: parsed.issues });
     }
-    const session = await onboardingService.startSession(parsed.data.inviteCode);
-    if (!session) {
+    const started = await onboardingService.startSession(parsed.data.inviteCode);
+    if (!started) {
       return jsonError(c, 404, "Onboarding invite not found or expired");
     }
-    const authenticatedSession = await onboardingService.authenticateSession(session.summary.id, session.participantToken);
-    if (!authenticatedSession) {
-      return jsonError(c, 500, "Onboarding session could not be initialized");
+    try {
+      const authenticatedSession = await onboardingService.authenticateSession(started.summary.id, started.participantToken);
+      if (!authenticatedSession) {
+        throw new Error("Onboarding session could not be initialized");
+      }
+      const response = c.json(
+        {
+          ok: true,
+          session: await onboardingService.provisionRealtimeVoice(authenticatedSession, {
+            consentAccepted: parsed.data.consentAccepted,
+            cloneConsentAccepted: parsed.data.cloneConsentAccepted,
+          }),
+        },
+        { status: 201 },
+      );
+      const maxAgeSeconds = Math.max(
+        0,
+        Math.floor((new Date(authenticatedSession.expiresAt).getTime() - Date.now()) / 1000),
+      );
+      response.headers.append(
+        "set-cookie",
+        buildSessionCookie(ONBOARDING_SESSION_COOKIE, started.participantToken, maxAgeSeconds, c.req.url),
+      );
+      return response;
+    } catch (error) {
+      await onboardingService.rollbackSessionStart(parsed.data.inviteCode, started.summary.id);
+      throw error;
     }
-    const response = c.json(
-      {
-        ok: true,
-        session: await onboardingService.provisionRealtimeVoice(authenticatedSession, {
-          consentAccepted: parsed.data.consentAccepted,
-          cloneConsentAccepted: parsed.data.cloneConsentAccepted,
-        }),
-      },
-      { status: 201 },
-    );
-    const maxAgeSeconds = Math.max(
-      0,
-      Math.floor((new Date(authenticatedSession.expiresAt).getTime() - Date.now()) / 1000),
-    );
-    response.headers.append(
-      "set-cookie",
-      buildSessionCookie(ONBOARDING_SESSION_COOKIE, session.participantToken, maxAgeSeconds, c.req.url),
-    );
-    return response;
   });
 
   app.get("/onboarding/invites/:inviteCode/session", async (c) => {
@@ -1514,6 +2244,7 @@ export function createApp(options?: {
       code: c.req.query("code"),
       accountEmail: c.req.query("email"),
       calendarLabel: c.req.query("calendar"),
+      redirectUri: `${config.publicApiUrl.replace(/\/$/, "")}/onboarding/calendar/microsoft/callback`,
     });
     if (!summary) {
       return jsonError(c, 404, "Onboarding session not found");
@@ -1644,7 +2375,7 @@ export function createApp(options?: {
     return c.json({
       ok: true,
       uploaded: storedPhotos.length,
-      upload: toPublicUploadSummary(completed),
+      upload: await toPublicUploadSummary(repo, completed),
     });
   };
 
@@ -1659,7 +2390,7 @@ export function createApp(options?: {
     }
     return c.json({
       ok: true,
-      upload: toPublicUploadSummary(upload),
+      upload: await toPublicUploadSummary(repo, upload),
     });
   });
 
@@ -1895,12 +2626,91 @@ export function createApp(options?: {
       return jsonError(c, 409, "Automation request was already processed");
     }
 
-    const job = await repo.ensureJob({
-      id: parsed.data.jobId ?? createId("job"),
-      staffId: parsed.data.staffId,
-      summary: parsed.data.notes ?? "Appointment created from voice tooling.",
-      status: parsed.data.startAt ? "scheduled" : "new",
-    });
+    const [staff, job] = await Promise.all([
+      parsed.data.staffId ? repo.getStaff(parsed.data.staffId) : Promise.resolve(undefined),
+      repo.ensureJob({
+        id: parsed.data.jobId ?? createId("job"),
+        staffId: parsed.data.staffId,
+        callerPhone: parsed.data.callerPhone,
+        summary: parsed.data.notes ?? "Appointment created from voice tooling.",
+        status: parsed.data.startAt ? "scheduled" : "new",
+      }),
+    ]);
+
+    let calendarSync:
+      | {
+          provider: string;
+          mode: "mock" | "configured";
+          status: "booked" | "skipped";
+          eventId?: string;
+          reason?: string;
+          webLink?: string;
+        }
+      | undefined;
+
+    let outlookEventId = parsed.data.outlookEventId;
+    let appointmentStatus: "proposed" | "booked" = parsed.data.startAt ? "booked" : "proposed";
+    if (parsed.data.startAt) {
+      const calendarConnection = staff?.calendarConnection;
+      if (
+        providers.calendar.mode === "configured" &&
+        (!calendarConnection || calendarConnection.status !== "connected" || !calendarConnection.accessToken)
+      ) {
+        appointmentStatus = "proposed";
+        calendarSync = {
+          provider: "microsoft-calendar",
+          mode: providers.calendar.mode,
+          status: "skipped",
+          reason: "Staff calendar is not connected with a reusable server-side credential.",
+        };
+      } else {
+        const event = await providers.calendar.createEvent({
+          staffName: staff?.fullName ?? parsed.data.staffId ?? "Curve AI Staff",
+          startAt: parsed.data.startAt,
+          endAt: parsed.data.endAt,
+          timezone:
+            parsed.data.timezone ??
+            staff?.calendarConnection?.timezone ??
+            staff?.timezone ??
+            "Australia/Sydney",
+          location: parsed.data.location,
+          notes: parsed.data.notes,
+          subject: job.summary?.trim() || `Curve AI job ${job.id}`,
+          accountEmail: calendarConnection?.accountEmail,
+          calendarId: calendarConnection?.calendarId,
+          calendarLabel: calendarConnection?.calendarLabel,
+          accessToken: calendarConnection?.accessToken,
+          refreshToken: calendarConnection?.refreshToken,
+          tokenExpiresAt: calendarConnection?.tokenExpiresAt,
+        });
+        if (staff && event.credential?.accessToken) {
+          await repo.saveStaffCalendarConnection({
+            staffId: staff.id,
+            provider: "outlook",
+            status: "connected",
+            accountEmail: calendarConnection?.accountEmail,
+            calendarId: calendarConnection?.calendarId,
+            calendarLabel: calendarConnection?.calendarLabel,
+            timezone: calendarConnection?.timezone ?? staff.timezone,
+            authState: undefined,
+            accessToken: event.credential.accessToken,
+            refreshToken: event.credential.refreshToken ?? calendarConnection?.refreshToken,
+            tokenExpiresAt: event.credential.tokenExpiresAt,
+            lastError: undefined,
+            connectedAt: calendarConnection?.connectedAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        outlookEventId = event.eventId;
+        calendarSync = {
+          provider: event.provider,
+          mode: event.mode,
+          status: event.status,
+          eventId: event.eventId,
+          webLink: event.webLink,
+        };
+      }
+    }
 
     const appointment = await repo.upsertAppointment({
       id: createId("appointment"),
@@ -1908,8 +2718,8 @@ export function createApp(options?: {
       staffId: parsed.data.staffId,
       startAt: parsed.data.startAt,
       endAt: parsed.data.endAt,
-      status: parsed.data.startAt ? "booked" : "proposed",
-      outlookEventId: parsed.data.outlookEventId,
+      status: appointmentStatus,
+      outlookEventId,
       location: parsed.data.location,
       notes: parsed.data.notes,
       createdAt: new Date().toISOString(),
@@ -1920,6 +2730,7 @@ export function createApp(options?: {
       ok: true,
       job,
       appointment,
+      ...(calendarSync ? { calendarSync } : {}),
     });
   });
 
@@ -1948,29 +2759,81 @@ export function createApp(options?: {
       return jsonError(c, 409, "Automation request was already processed");
     }
 
-    const job = await repo.ensureJob({
-      id: parsed.data.jobId ?? createId("job"),
-      staffId: parsed.data.staffId,
-      callerPhone: parsed.data.callerPhone,
-      summary: parsed.data.notes ?? "Photo upload requested from voice tooling.",
-      status: "new",
-    });
+    const [staff, job] = await Promise.all([
+      parsed.data.staffId ? repo.getStaff(parsed.data.staffId) : Promise.resolve(undefined),
+      repo.ensureJob({
+        id: parsed.data.jobId ?? createId("job"),
+        staffId: parsed.data.staffId,
+        callerPhone: parsed.data.callerPhone,
+        summary: parsed.data.jobId ? undefined : "Customer photo upload requested.",
+        status: "new",
+      }),
+    ]);
     const expiresAt = new Date(Date.now() + (parsed.data.ttlHours ?? 24) * 60 * 60 * 1000).toISOString();
     const token = createId("upload");
+    const uploadLink = `${config.publicUploadAppUrl.replace(/\/$/, "")}/upload/${token}`;
     const uploadRequest = await repo.createUploadRequest({
       token,
       jobId: job.id,
       staffId: parsed.data.staffId,
       callerPhone: parsed.data.callerPhone,
       notes: parsed.data.notes,
-      uploadLink: `${config.publicUploadAppUrl.replace(/\/$/, "")}/upload/${token}`,
+      uploadLink,
       expiresAt,
     });
+
+    const staffId = parsed.data.staffId;
+    const callerPhone = parsed.data.callerPhone;
+    const uploadRequestId = uploadRequest.token;
+    const deliveryBody = buildPhotoUploadSmsBody({
+      uploadLink,
+      jobSummary: publicJobSummary(job.summary, job.issue, parsed.data.notes),
+      requestNote: parsed.data.notes,
+      requestedBy: staff?.fullName,
+    });
+    const delivery =
+      callerPhone && deliveryBody
+        ? {
+            provider: "twilio-sms",
+            mode: providers.messaging.mode,
+            messageId: `pending_${uploadRequestId}`,
+            status: "queued",
+            to: callerPhone,
+          }
+        : {
+            provider: "twilio-sms",
+            mode: providers.messaging.mode,
+            status: "skipped",
+            reason: "No caller phone number was provided for SMS delivery.",
+          };
+
+    if (callerPhone && deliveryBody) {
+      const deliveryTask = providers.messaging
+        .sendText({
+          to: callerPhone,
+          body: deliveryBody,
+        })
+        .catch((error) => {
+          writeLog("warn", "voice.photo_link_sms_failed", {
+            jobId: job.id,
+            staffId,
+            callerPhone,
+            uploadRequestId,
+            error: summarizeError(error),
+          });
+        });
+      try {
+        c.executionCtx.waitUntil(deliveryTask);
+      } catch {
+        void deliveryTask;
+      }
+    }
 
     return c.json({
       ok: true,
       job,
       uploadRequest,
+      delivery,
     });
   });
 

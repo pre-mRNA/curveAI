@@ -7,8 +7,7 @@ Do not treat this app as "static Pages only". The product needs server-side secr
 
 ## Target Topology
 
-- `Pages` hosts separate browser apps for onboarding, internal ops, and customer uploads.
-- `Pages` also hosts a staff-facing browser app while the native mobile surface is deferred.
+- `Pages` hosts four separate browser apps: onboarding, internal ops, staff, and customer uploads.
 - The internal ops Pages app now also hosts the first Worker-backed AI test studio route.
 - `Workers` hosts the API surface, including onboarding, health, uploads, provider glue, and admin-only routes.
 - `D1` stores durable relational state for staff, invites, onboarding sessions, jobs, quotes, uploads, and provider metadata.
@@ -26,7 +25,7 @@ Use these as the deployment contract for the Worker:
 - `ARTIFACTS_BUCKET` - R2 binding for uploads and voice artifacts
 - `ONBOARDING_SESSIONS` - Durable Object namespace for live interview coordination
 - `PUBLIC_OPS_APP_URL` - internal ops Pages origin
-- `PUBLIC_STAFF_APP_URL` - staff-facing Pages origin if deployed separately
+- `PUBLIC_STAFF_APP_URL` - staff-facing Pages origin
 - `PUBLIC_ONBOARDING_APP_URL` - public onboarding Pages origin
 - `PUBLIC_UPLOAD_APP_URL` - public customer upload Pages origin
 - `PUBLIC_API_URL` - Worker origin
@@ -36,12 +35,22 @@ Use these as the deployment contract for the Worker:
 - `ALLOW_INSECURE_TEST_OTP` - optional `true` only for isolated local development when the admin invite route should echo raw OTP codes before Twilio Verify exists
 - `ELEVENLABS_API_KEY` - ElevenLabs provider key
 - `ELEVENLABS_AGENT_ID` - ElevenLabs browser agent identifier
+- `ELEVENLABS_BASE_URL` - optional override for local/mock ElevenLabs-compatible signed-url testing
+- `MICROSOFT_AUTH_BASE_URL` - optional override for local/mock Microsoft OAuth token and authorize testing
+- `MICROSOFT_GRAPH_BASE_URL` - optional override for local/mock Microsoft Graph testing, including event creation
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` - Twilio SMS provider config
+- `TWILIO_BASE_URL` - optional override for local/mock Twilio-compatible SMS testing
+- `OPENAI_API_KEY` - optional local or CI fallback for the `openai-compatible` reasoning and AI test paths when the explicit `REASONING_API_KEY` / `AI_TEST_*_API_KEY` vars are omitted
 - `REASONING_PROVIDER` - `mock`, `hosted`, or `openai-compatible`
 - `REASONING_BASE_URL` - base URL for the portable reasoning endpoint
 - `REASONING_API_KEY` - API key for the reasoning provider
+- `REASONING_MODEL` - optional OpenAI-compatible reasoning model override
+- `AI_TEST_RUNNER_PROVIDER`, `AI_TEST_RUNNER_BASE_URL`, `AI_TEST_RUNNER_API_KEY`, `AI_TEST_RUNNER_MODEL` - runner provider config
+- `AI_TEST_JUDGE_PROVIDER`, `AI_TEST_JUDGE_BASE_URL`, `AI_TEST_JUDGE_API_KEY`, `AI_TEST_JUDGE_MODEL` - judge provider config
 
 Microsoft and Twilio secrets stay optional in staging until those integrations are enabled.
 When they are added later, keep them server-side only and wire them through the Worker, not the browser.
+For local integration testing, the Worker now exposes mock provider routes at `/mock/providers/microsoft/*`, `/mock/providers/elevenlabs/*`, and `/mock/providers/twilio/*`. `MICROSOFT_AUTH_BASE_URL`, `MICROSOFT_GRAPH_BASE_URL`, `ELEVENLABS_BASE_URL`, and `TWILIO_BASE_URL` can point at those routes so configured-mode onboarding, calendar booking, realtime voice, and SMS flows can be tested without live provider accounts.
 
 Use these as the deployment contract for each Pages app:
 
@@ -55,10 +64,11 @@ The Pages apps no longer rely on `/api` same-origin behavior in production.
 Their build scripts will warn locally when `VITE_API_BASE_URL` is missing and should fail in Pages or strict builds.
 Browser auth for onboarding and staff now relies on Worker-issued `HttpOnly` session cookies instead of browser-stored reusable bearer tokens.
 
-Use this env var for migration and deploy scripts:
+Use these env vars for migration and deploy scripts:
 
 - `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
 - `CLOUDFLARE_D1_DATABASE_ID` - actual D1 database id used by the env-driven Worker deploy script
+- `CLOUDFLARE_R2_BUCKET_NAME` - optional override for the Worker artifact bucket name during deploy rendering
 
 ## Why This Replaces Fly
 
@@ -77,13 +87,15 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 ## Staging Shape
 
 - Staging should be internal-only behind Cloudflare Access.
-- Use dedicated Pages projects for onboarding, ops, and uploads, plus a separate Worker route for the API.
+- Use dedicated Pages projects for onboarding, ops, staff, and uploads, plus a separate Worker route for the API.
 - Keep provider callbacks and signed upload endpoints reachable through the API origin, but still state-bound and token-checked.
-- Keep the three public app URLs and the API URL explicit.
+- Keep all four app URLs and the API URL explicit.
 - For reliable browser sessions, prefer same-site custom domains such as `ops.<your-domain>`, `staff.<your-domain>`, `onboard.<your-domain>`, `upload.<your-domain>`, and `api.<your-domain>` rather than mixing `pages.dev` and `workers.dev` review hosts. Cross-site hostnames can trigger third-party cookie blocking in some browsers.
+- The checked-in `wrangler.jsonc` files still use `pages.dev` / `workers.dev` defaults so the repo remains runnable out of the box. Override those `PUBLIC_*_APP_URL` values when you move to real staging domains.
 - If Access is not configured yet, set `REVIEW_PASSCODE` and `REVIEW_COOKIE_SECRET` on each Pages project to enable the fallback review gate.
 - That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
 - The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
+- The four Pages apps now import one shared review-gate implementation from the repo root, and `npm run test:pages-gate` exercises the fail-closed, asset-blocking, cookie-issuance, and logout paths centrally.
 - Worker route families are now origin-fenced by app surface:
   - `/dashboard` and `/ai-test-studio/*` only accept the ops origin
   - `/staff/*`, `/jobs*`, and `/assets/*` only accept the staff or ops origin
@@ -100,9 +112,9 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - For Worker deploys, the checked-in `apps/edge-api/wrangler.jsonc` stays template-like and `npm run deploy:edge-api` renders a temporary config from `CLOUDFLARE_D1_DATABASE_ID` before calling `wrangler deploy`.
 - `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
 - That example includes the Worker deploy-time secrets (`ADMIN_TOKEN`, `AUTOMATION_SHARED_SECRET`) but the Pages review-gate secrets still have to be provisioned on each Pages project runtime.
-- Keep the Express app only as a local reference while the remaining non-onboarding routes are migrated.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
 - Use lowercase aliases only as temporary compatibility shims if an existing secret file already contains them.
+- The local Worker dev script now hydrates the untracked `apps/edge-api/.dev.vars` file from the repo-root `secrets` file first, then falls back to shell `OPENAI_API_KEY` when explicit Cloudflare names are missing, so local dev can use real providers without copying secrets into tracked config. If those source secrets disappear, the auto-managed local provider entries are cleaned back to `mock` mode instead of leaving stale paid-provider settings behind.
 - The repo now includes `wrangler.jsonc` files for each Pages app plus `npm run deploy:pages:onboarding`, `deploy:pages:ops`, `deploy:pages:staff`, `deploy:pages:upload`, and `deploy:cloudflare:staging`.
 
 ## Frontend Performance Defaults
@@ -117,8 +129,8 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - Static Pages alone is not enough for this product.
 - The deployment target is Cloudflare-only, and the repo now includes Worker implementations for health, dashboard auth, browser onboarding, Microsoft callback handling, upload token/photo flows, authenticated photo assets, and the current voice tool endpoints including post-call ingestion.
 - Automation signatures are route-bound now: callers sign `timestamp.method.path.rawBody`, not just `timestamp.rawBody`.
-- The staff browser app currently replaces the native iOS surface for live queue testing; it should be treated as a first-class Pages deployment in CORS and environment setup.
+- The staff browser app is the active field surface and should be treated as a first-class Pages deployment in CORS and environment setup.
 - The AI test studio now depends on the same Worker origin and admin token flow as the ops dashboard, so it should be treated as part of the protected internal Pages surface rather than a separate local-only tool.
-- `/health` now reports worker readiness warnings when required public URLs or signing secrets are missing, and non-local requests fail fast when the worker is misconfigured.
-- The Express app remains a local reference, but the Cloudflare route surface is now the primary staging path for onboarding, ops, and customer uploads.
+- `/health` now reports `blockingIssues` for platform-level readiness gaps and `advisoryIssues` for partial optional-provider setup. Non-local requests fail fast only on blocking issues, while partial ElevenLabs/OpenAI/Microsoft configuration stays visible to admin and local callers without taking the whole Worker offline.
+- `/voice/tools/appointment` now uses the calendar adapter for provider-backed event creation when a connected staff calendar exposes an external provider token, and `/voice/tools/send-photo-link` now uses the messaging adapter for provider-backed SMS delivery while still creating the local upload request.
 - Keep core business logic portable so the worker runtime can be swapped or self-hosted later if needed.

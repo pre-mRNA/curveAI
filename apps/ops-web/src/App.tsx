@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
+import { scheduleBrowserWarmup } from '../../../packages/shared/src/browserWarmup';
 import { apiClient, ApiError } from './api/client';
 import { opsBrand, opsBrandStyle } from './brand';
 import {
@@ -50,14 +51,16 @@ function DashboardPage() {
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadTestStudioPage();
-    }, 600);
+    if (!storedToken) {
+      return undefined;
+    }
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, []);
+    const cleanup = scheduleBrowserWarmup(() => {
+      void loadTestStudioPage();
+    }, { timeout: 1500 });
+
+    return cleanup;
+  }, [storedToken]);
 
   useEffect(() => {
     let alive = true;
@@ -136,6 +139,9 @@ function DashboardPage() {
       badgeTitle={opsBrand.badgeTitle}
       badgeDescription={opsBrand.badgeDescription}
       storedToken={storedToken}
+      onWarmTestStudio={() => {
+        void loadTestStudioPage();
+      }}
       onSignOut={clearToken}
     >
       {!storedToken ? (

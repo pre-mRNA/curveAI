@@ -1,6 +1,7 @@
 import { FormEvent, Suspense, lazy, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
+import { scheduleBrowserWarmup } from '../../../packages/shared/src/browserWarmup';
 import { onboardingBrand, onboardingBrandStyle } from './brand';
 
 const loadOnboardingPage = () => import('./onboarding/OnboardingPage');
@@ -11,13 +12,11 @@ function OnboardingLanding() {
   const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const cleanup = scheduleBrowserWarmup(() => {
       void loadOnboardingPage();
-    }, 250);
+    });
 
-    return () => {
-      window.clearTimeout(timer);
-    };
+    return cleanup;
   }, []);
 
   const submitInviteCode = (event: FormEvent<HTMLFormElement>) => {
@@ -37,9 +36,9 @@ function OnboardingLanding() {
           <h1>{onboardingBrand.heroTitle}</h1>
           <p>{onboardingBrand.heroDescription}</p>
           <div className="meta-row">
-            <span className="pill accent">About 10 minutes</span>
-            <span className="pill">Secure invite</span>
-            <span className="pill">Phone or desktop</span>
+            <span className="pill accent">10 minutes</span>
+            <span className="pill">Private link</span>
+            <span className="pill">Best done in one go</span>
           </div>
         </header>
 
@@ -48,23 +47,29 @@ function OnboardingLanding() {
             <div className="card">
               <div className="card-inner onboarding-stage">
                 <div className="eyebrow">What happens next</div>
-                <h2>Follow the guided setup from start to finish.</h2>
+                <h2>Three quick steps.</h2>
+                <p className="muted">This private link sets up how the assistant talks, books, and handles your jobs.</p>
                 <div className="landing-step-grid">
                   <div className="landing-step-card">
                     <span className="landing-step-number">1</span>
-                    <strong>Consent</strong>
-                    <div className="muted">Confirm the recording, cloning, and profile permissions before anything starts.</div>
+                    <strong>Say yes</strong>
+                    <div className="muted">Tick the boxes so setup can start.</div>
                   </div>
                   <div className="landing-step-card">
                     <span className="landing-step-number">2</span>
-                    <strong>Interview and review</strong>
-                    <div className="muted">Answer the setup interview, then check the extracted profile before it goes live.</div>
+                    <strong>Answer questions</strong>
+                    <div className="muted">Tell us how you work and check the details.</div>
                   </div>
-                  <div className="landing-step-card">
-                    <span className="landing-step-number">3</span>
-                    <strong>Calendar and voice setup</strong>
-                    <div className="muted">Connect the working calendar and record a clean sample for voice cloning.</div>
-                  </div>
+                    <div className="landing-step-card">
+                      <span className="landing-step-number">3</span>
+                      <strong>Calendar and voice</strong>
+                      <div className="muted">Connect your calendar and record your voice.</div>
+                    </div>
+                </div>
+                <div className="landing-assurance-row">
+                  <span className="pill">Use your phone or computer</span>
+                  <span className="pill">Check details before finish</span>
+                  <span className="pill">Come back on the same link if you stop</span>
                 </div>
               </div>
             </div>
@@ -73,9 +78,7 @@ function OnboardingLanding() {
               <div className="card-inner onboarding-stage">
                 <div className="eyebrow">Open the session</div>
                 <h2>Already have your invite code?</h2>
-                <p className="muted">
-                  Paste it here to jump straight into the secure onboarding flow in this browser.
-                </p>
+                <p className="muted">Paste the code from your text or email to open your setup.</p>
                 <form className="invite-entry-form" onSubmit={submitInviteCode}>
                   <label className="field" htmlFor="landing-invite-code">
                     <span>Invite code</span>
@@ -94,10 +97,17 @@ function OnboardingLanding() {
                     />
                   </label>
                   <div className="invite-entry-row">
-                    <button className="button" type="submit" disabled={!inviteCode.trim()}>
-                      Open onboarding
+                    <button
+                      className="button"
+                      type="submit"
+                      disabled={!inviteCode.trim()}
+                      onPointerEnter={() => {
+                        void loadOnboardingPage();
+                      }}
+                    >
+                      Start setup
                     </button>
-                    <span className="muted">Keep the same tab open until onboarding is complete.</span>
+                    <span className="muted">If you already started, use the same browser and link again.</span>
                   </div>
                 </form>
               </div>
@@ -108,27 +118,24 @@ function OnboardingLanding() {
             <div className="card">
               <div className="card-inner onboarding-sidebar">
                 <div className="eyebrow">{onboardingBrand.surfaceName}</div>
-                <h3>Come in with the basics, not a perfect script.</h3>
+                <h3>Have these ready.</h3>
                 <ul className="guide-list">
-                  <li>Your service areas, job types, and any work you do not want the agent handling.</li>
-                  <li>Your usual quoting style, pricing guardrails, and when callbacks are required.</li>
-                  <li>Calendar access and a quiet spot for the clean voice sample.</li>
+                  <li>Know the jobs you do and the jobs you do not want.</li>
+                  <li>Know your normal pricing and when the assistant should ask you first.</li>
+                  <li>Have your calendar handy and find a quiet spot for the voice sample.</li>
                 </ul>
               </div>
             </div>
 
             <div className="card">
               <div className="card-inner onboarding-sidebar">
-                <div className="eyebrow">{onboardingBrand.badgeLabel}</div>
-                <h3>This flow is designed to finish in one sitting.</h3>
-                <p className="muted">
-                  Your secure invite opens one browser session. Stay on the same tab while you move through interview,
-                  review, calendar, and voice setup.
-                </p>
+                <div className="eyebrow">What you get</div>
+                <h3>By the end of setup.</h3>
+                <p className="muted">The assistant will be much closer to how you actually work.</p>
                 <ul className="guide-list compact">
-                  <li>Microphone access is only needed for the clean voice sample step.</li>
-                  <li>If you stop halfway through, return to the same browser and invite link.</li>
-                  <li>Nothing starts until the consent boxes are checked.</li>
+                  <li>It knows the jobs you take and the ones you avoid.</li>
+                  <li>It can book into the calendar you connect here.</li>
+                  <li>It can use your voice sample so it sounds more like you.</li>
                 </ul>
               </div>
             </div>
@@ -146,8 +153,8 @@ function RouteFallback() {
         <div className="card">
           <div className="card-inner onboarding-stage">
             <div className="eyebrow">Loading</div>
-            <h2>Opening the secure onboarding flow.</h2>
-            <p className="muted">Pulling the full interview and review experience into this tab.</p>
+            <h2>Opening setup.</h2>
+            <p className="muted">Loading the next page.</p>
           </div>
         </div>
       </div>

@@ -6,6 +6,11 @@ export type UploadRequestSummary = {
   fileCount: number;
   status: string;
   expiresAt: string;
+  requestedBy?: string;
+  businessName?: string;
+  siteLabel?: string;
+  jobSummary?: string;
+  requestNote?: string;
 };
 
 export class ApiError extends Error {
@@ -31,7 +36,10 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
   }
 }
 
-export async function uploadPhotos(token: string, files: File[]): Promise<{ ok: true; uploaded: number }> {
+export async function uploadPhotos(
+  token: string,
+  files: File[],
+): Promise<{ ok: true; uploaded: number; upload: UploadRequestSummary }> {
   const formData = new FormData();
   files.forEach((file) => formData.append('photos', file));
 
@@ -44,7 +52,7 @@ export async function uploadPhotos(token: string, files: File[]): Promise<{ ok: 
     throw new ApiError(response.status, await readErrorMessage(response, `Upload failed: ${response.status}`));
   }
 
-  return (await response.json()) as { ok: true; uploaded: number };
+  return (await response.json()) as { ok: true; uploaded: number; upload: UploadRequestSummary };
 }
 
 export async function getUploadRequest(token: string): Promise<UploadRequestSummary> {

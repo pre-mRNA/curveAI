@@ -1,18 +1,15 @@
 export type StaffVoiceConsentStatus = 'pending' | 'granted' | 'revoked';
 export type JobStatus = 'new' | 'quoted' | 'booked' | 'needs_follow_up' | 'completed';
 
-export interface StaffSession {
-  expiresAt: string;
-  staffId: string;
-}
-
 export interface CalendarConnection {
   provider: 'outlook';
+  status: 'pending' | 'connected' | 'error';
   accountEmail?: string;
   calendarId?: string;
+  calendarLabel?: string;
   timezone?: string;
-  externalConnectionId?: string;
-  connectedAt: string;
+  connectedAt?: string;
+  lastError?: string;
 }
 
 export interface PricingProfile {

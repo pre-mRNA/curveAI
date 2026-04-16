@@ -113,12 +113,14 @@ export interface RealtimeVoiceSession {
 export interface CalendarConnectionSummary {
   provider: string;
   mode: ProviderMode;
-  status: "pending" | "connected";
+  status: "pending" | "connected" | "error";
   authUrl?: string;
   authState?: string;
   accountEmail?: string;
+  calendarId?: string;
   calendarLabel?: string;
   connectedAt?: string;
+  lastError?: string;
 }
 
 export interface VoiceSampleAssessment {
@@ -414,13 +416,22 @@ export interface PricingProfileRecord {
   confidenceFloor: number;
 }
 
+export type CalendarConnectionStatus = "pending" | "connected" | "error";
+
 export interface CalendarConnectionRecord {
   provider: "outlook";
+  status: CalendarConnectionStatus;
   accountEmail?: string;
   calendarId?: string;
+  calendarLabel?: string;
   timezone?: string;
-  externalConnectionId?: string;
-  connectedAt: string;
+  authState?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  lastError?: string;
+  connectedAt?: string;
+  updatedAt?: string;
 }
 
 export interface StaffRecord extends StaffProfileSummary {
@@ -504,6 +515,8 @@ export interface AiTestRunnerResultRecord {
   model: string;
   outputText: string;
   toolCalls: string[];
+  executionMode?: "simulated" | "worker-route";
+  observedEffects?: string[];
   latencyMs: number;
   fallbackUsed: boolean;
   fallbackReason?: string;

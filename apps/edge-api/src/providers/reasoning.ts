@@ -6,6 +6,7 @@ import type {
   OnboardingSessionRecord,
   SupervisorPrompt,
 } from "../models.js";
+import { requestOpenAiStructuredJson } from "./openai-responses.js";
 
 export interface ReasoningProvider {
   readonly mode: "mock" | "hosted" | "openai-compatible";
@@ -213,15 +214,50 @@ export class HttpReasoningProvider implements ReasoningProvider {
     private readonly config: {
       baseUrl: string;
       apiKey: string;
+      model?: string;
       mode: "hosted" | "openai-compatible";
       fallback: HeuristicReasoningProvider;
+      fetchImpl?: typeof fetch;
     },
   ) {
     this.mode = config.mode;
   }
 
   async analyzeSession(session: OnboardingSessionRecord, turns: Array<{ speaker: string; text: string }>) {
-    const response = await fetch(this.config.baseUrl, {
+    if (this.config.mode === "openai-compatible") {
+      try {
+        const result = await requestOpenAiStructuredJson<{
+          analysis?: OnboardingAnalysis;
+          review?: ExtractionReview;
+        }>({
+          apiKey: this.config.apiKey,
+          baseUrl: this.config.baseUrl,
+          model: this.config.model ?? "gpt-4.1-mini",
+          schemaName: "curve_onboarding_analysis",
+          schema: openAiReasoningResponseSchema,
+          instructions:
+            "You analyze tradie onboarding interviews for Curve AI. Return strict JSON only. Use the transcript and checklist to score coverage, propose concise follow-up questions, and produce an editable operational profile. Keep outputs practical, avoid secrets, and do not invent business facts.",
+          userPayload: {
+            session: sanitizeSessionForReasoning(session),
+            turns,
+            checklist: onboardingChecklist.map(({ keywords: _keywords, ...item }) => item),
+          },
+          fetchImpl: this.config.fetchImpl,
+          maxOutputTokens: 2400,
+        });
+        if (result.parsed.analysis && result.parsed.review) {
+          return {
+            analysis: result.parsed.analysis,
+            review: result.parsed.review,
+          };
+        }
+      } catch (_error) {
+        return this.config.fallback.analyzeSession(session, turns);
+      }
+      return this.config.fallback.analyzeSession(session, turns);
+    }
+
+    const response = await (this.config.fetchImpl ?? fetch)(this.config.baseUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -249,6 +285,134 @@ export class HttpReasoningProvider implements ReasoningProvider {
     };
   }
 }
+
+const stringArraySchema = {
+  type: "array",
+  items: { type: "string" },
+} as const;
+
+const openAiReasoningResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    analysis: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        coverage: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              section: { type: "string" },
+              title: { type: "string" },
+              prompt: { type: "string" },
+              status: {
+                type: "string",
+                enum: ["pending", "covered", "needs_follow_up"],
+              },
+              evidence: stringArraySchema,
+            },
+            required: ["id", "section", "title", "prompt", "status", "evidence"],
+          },
+        },
+        recommendedQuestions: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              section: { type: "string" },
+              reason: { type: "string" },
+              question: { type: "string" },
+            },
+            required: ["id", "section", "reason", "question"],
+          },
+        },
+        coverageScore: { type: "number" },
+        interviewerBrief: { type: "string" },
+      },
+      required: ["coverage", "recommendedQuestions", "coverageScore", "interviewerBrief"],
+    },
+    review: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        businessSummary: { type: "string" },
+        staffProfile: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            staffName: { type: "string" },
+            companyName: { type: "string" },
+            role: { type: "string" },
+            calendarProvider: { type: "string" },
+          },
+          required: ["staffName", "companyName", "role", "calendarProvider"],
+        },
+        communicationProfile: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            tone: { type: "string" },
+            salesStyle: { type: "string" },
+            riskTolerance: { type: "string" },
+            customerHandlingRules: stringArraySchema,
+          },
+          required: ["tone", "salesStyle", "riskTolerance", "customerHandlingRules"],
+        },
+        pricingProfile: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            quotingStyle: { type: "string" },
+            calloutPolicy: { type: "string" },
+            afterHoursPolicy: { type: "string" },
+            approvalThreshold: { type: "string" },
+          },
+          required: ["quotingStyle", "calloutPolicy", "afterHoursPolicy", "approvalThreshold"],
+        },
+        businessPractices: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            services: stringArraySchema,
+            serviceAreas: stringArraySchema,
+            operatingHours: { type: "string" },
+            exclusions: stringArraySchema,
+            escalationRules: stringArraySchema,
+          },
+          required: ["services", "serviceAreas", "operatingHours", "exclusions", "escalationRules"],
+        },
+        crmDiscovery: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            currentSystem: { type: "string" },
+            syncPreference: { type: "string" },
+            sourceOfTruth: { type: "string" },
+            notes: stringArraySchema,
+          },
+          required: ["currentSystem", "syncPreference", "sourceOfTruth", "notes"],
+        },
+        missingFields: stringArraySchema,
+      },
+      required: [
+        "businessSummary",
+        "staffProfile",
+        "communicationProfile",
+        "pricingProfile",
+        "businessPractices",
+        "crmDiscovery",
+        "missingFields",
+      ],
+    },
+  },
+  required: ["analysis", "review"],
+} as const;
 
 function sanitizeSessionForReasoning(session: OnboardingSessionRecord) {
   return {

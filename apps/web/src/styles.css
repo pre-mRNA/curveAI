@@ -1,20 +1,23 @@
 :root {
   color-scheme: light;
-  --bg-top: #f9f5ef;
-  --bg-bottom: #f1ebe2;
-  --glow-left: rgba(31, 103, 127, 0.15);
-  --glow-right: rgba(201, 101, 66, 0.14);
-  --bg: #f3eee6;
-  --panel: rgba(255, 255, 255, 0.86);
+  --bg-top: #eef4f7;
+  --bg-bottom: #dfe7eb;
+  --glow-left: rgba(23, 130, 173, 0.16);
+  --glow-right: rgba(108, 217, 255, 0.12);
+  --bg: #e8f0f4;
+  --panel: rgba(247, 251, 253, 0.82);
   --panel-solid: #ffffff;
-  --text: #18212a;
-  --muted: #5a6672;
-  --accent: #1f677f;
-  --accent-strong: #144f62;
-  --accent-2: #c96542;
-  --accent-soft: rgba(31, 103, 127, 0.12);
-  --line: rgba(24, 33, 42, 0.1);
-  --shadow: 0 18px 50px rgba(24, 33, 42, 0.12);
+  --text: #10212c;
+  --muted: #5d6f7b;
+  --accent: #1782ad;
+  --accent-strong: #0c5f81;
+  --accent-2: #d77943;
+  --accent-soft: rgba(23, 130, 173, 0.12);
+  --line: rgba(16, 33, 44, 0.12);
+  --line-strong: rgba(23, 130, 173, 0.2);
+  --shadow: 0 24px 80px rgba(12, 42, 59, 0.14);
+  --grid-line: rgba(23, 130, 173, 0.065);
+  --scanline: rgba(255, 255, 255, 0.38);
   --font-sans: 'Avenir Next', 'Manrope', 'Segoe UI', sans-serif;
   --font-display: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
@@ -32,7 +35,7 @@ body,
 
 body {
   font-family: var(--font-sans);
-  background: var(--bg-top);
+  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
   color: var(--text);
   line-height: 1.5;
 }
@@ -44,7 +47,8 @@ a {
 code {
   padding: 0.14rem 0.38rem;
   border-radius: 0.45rem;
-  background: rgba(31, 103, 127, 0.08);
+  background: rgba(23, 130, 173, 0.08);
+  border: 1px solid rgba(23, 130, 173, 0.12);
   color: var(--accent);
 }
 
@@ -98,7 +102,17 @@ input[type='checkbox'] {
   background:
     radial-gradient(circle at top left, var(--glow-left), transparent 28%),
     radial-gradient(circle at top right, var(--glow-right), transparent 24%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(180deg, var(--scanline), transparent 18%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  background-size:
+    auto,
+    auto,
+    26px 26px,
+    26px 26px,
+    100% 100%,
+    auto;
 }
 
 .container {
@@ -142,11 +156,13 @@ input[type='checkbox'] {
   align-items: center;
   gap: 16px;
   padding: 14px 18px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: var(--panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
 }
 
 .topbar,
@@ -184,11 +200,23 @@ input[type='checkbox'] {
 }
 
 .card {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 22px;
   background: var(--panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+}
+
+.topbar::before,
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(120, 221, 255, 0.9), transparent);
+  opacity: 0.9;
 }
 
 .card-inner {
@@ -231,14 +259,15 @@ input[type='checkbox'] {
   gap: 8px;
   padding: 7px 11px;
   border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(23, 130, 173, 0.14);
+  background: rgba(244, 250, 252, 0.82);
   font-size: 0.85rem;
 }
 
 .pill.accent {
-  border-color: rgba(44, 111, 142, 0.22);
+  border-color: rgba(23, 130, 173, 0.24);
   color: var(--accent);
+  background: rgba(23, 130, 173, 0.1);
 }
 
 .pill.good {
@@ -271,8 +300,8 @@ input[type='checkbox'] {
 .photo {
   overflow: hidden;
   border-radius: 16px;
-  border: 1px solid rgba(28, 32, 38, 0.08);
-  background: #eef1f5;
+  border: 1px solid rgba(23, 130, 173, 0.14);
+  background: linear-gradient(180deg, rgba(230, 242, 247, 0.92), rgba(244, 249, 251, 0.92));
 }
 
 .photo img {
@@ -344,8 +373,8 @@ input[type='checkbox'] {
 .stat {
   padding: 14px;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(44, 111, 142, 0.08), rgba(255, 255, 255, 0.95));
-  border: 1px solid rgba(44, 111, 142, 0.12);
+  background: linear-gradient(180deg, rgba(23, 130, 173, 0.12), rgba(255, 255, 255, 0.96));
+  border: 1px solid rgba(23, 130, 173, 0.16);
 }
 
 .stat strong {
@@ -390,8 +419,10 @@ input[type='checkbox'] {
   text-align: center;
   padding: 26px;
   border-radius: 20px;
-  border: 1.5px dashed rgba(44, 111, 142, 0.35);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1.5px dashed rgba(23, 130, 173, 0.36);
+  background:
+    linear-gradient(180deg, rgba(23, 130, 173, 0.08), rgba(255, 255, 255, 0.8)),
+    rgba(255, 255, 255, 0.72);
 }
 
 .dropzone input {
@@ -410,7 +441,8 @@ input[type='checkbox'] {
   font-weight: 700;
   cursor: pointer;
   color: white;
-  background: linear-gradient(135deg, var(--accent), #245b73);
+  background: linear-gradient(135deg, #23a4d5, var(--accent-strong));
+  box-shadow: 0 14px 30px rgba(12, 95, 129, 0.22);
   transition:
     transform 120ms ease,
     box-shadow 120ms ease,
@@ -419,8 +451,9 @@ input[type='checkbox'] {
 
 .button.secondary {
   color: var(--text);
-  background: #f1ece4;
-  border: 1px solid var(--line);
+  background: rgba(246, 250, 252, 0.86);
+  border: 1px solid rgba(23, 130, 173, 0.14);
+  box-shadow: none;
 }
 
 .button.secondary:hover,
@@ -442,6 +475,24 @@ input[type='checkbox'] {
 .field label {
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+.support-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 18px;
+}
+
+.support-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(23, 130, 173, 0.14);
+  background:
+    linear-gradient(180deg, rgba(23, 130, 173, 0.08), rgba(255, 255, 255, 0.94)),
+    var(--panel-solid);
 }
 
 .onboarding-shell {
@@ -468,14 +519,21 @@ input[type='checkbox'] {
   gap: 12px;
 }
 
+.landing-assurance-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 .landing-step-card {
   display: grid;
   gap: 8px;
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid rgba(24, 33, 42, 0.08);
+  border: 1px solid rgba(23, 130, 173, 0.14);
   background:
-    linear-gradient(180deg, rgba(31, 103, 127, 0.05), rgba(255, 255, 255, 0.92)),
+    linear-gradient(180deg, rgba(23, 130, 173, 0.08), rgba(255, 255, 255, 0.94)),
     var(--panel-solid);
 }
 
@@ -485,8 +543,8 @@ input[type='checkbox'] {
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: linear-gradient(135deg, rgba(23, 130, 173, 0.18), rgba(110, 218, 255, 0.18));
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
@@ -660,6 +718,53 @@ input[type='checkbox'] {
   gap: 14px;
 }
 
+.review-section-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(28, 32, 38, 0.08);
+}
+
+.review-section-header {
+  display: grid;
+  gap: 4px;
+}
+
+.review-section-header h3 {
+  margin: 0;
+}
+
+.review-section-header p {
+  margin: 0;
+}
+
+.review-section-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.review-alert-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.review-alert-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 74, 22, 0.16);
+  background: rgba(255, 244, 236, 0.8);
+  color: #8a4a16;
+  font-size: 0.95rem;
+}
+
+.review-actions {
+  justify-content: flex-end;
+}
+
 .voice-preview {
   width: 100%;
 }
@@ -751,6 +856,14 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
+  .review-section-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .support-grid {
+    grid-template-columns: 1fr;
+  }
+
   .table-row {
     grid-template-columns: 1fr;
   }
@@ -760,6 +873,11 @@ input[type='checkbox'] {
   .shell,
   .upload-wrap {
     padding: 16px;
+  }
+
+  .onboarding-hero {
+    gap: 10px;
+    padding-bottom: 0;
   }
 
   .topbar {
@@ -779,16 +897,33 @@ input[type='checkbox'] {
     align-items: flex-start;
   }
 
+  .stepper {
+    grid-template-columns: 1fr;
+  }
+
   .step {
     padding: 12px;
     min-width: 0;
+  }
+
+  .step:not(.current) {
+    display: none;
   }
 
   .step .muted {
     display: none;
   }
 
+  .step.current .muted {
+    display: block;
+  }
+
   .stage-copy p {
+    display: block;
+  }
+
+  .stage-card,
+  .onboarding-grid > aside {
     display: none;
   }
 

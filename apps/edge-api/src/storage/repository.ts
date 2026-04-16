@@ -138,6 +138,8 @@ export interface OnboardingRepository {
   getStaffSession(tokenHash: string): Promise<StaffSessionRecord | undefined>;
   deleteStaffSession(tokenHash: string): Promise<void>;
   saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord>;
+  getStaffByCalendarAuthState(state: string): Promise<StaffRecord | undefined>;
+  deleteStaffCalendarConnection(staffId: string): Promise<void>;
   listJobs(staffId?: string): Promise<JobRecord[]>;
   getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;
   getCustomerProfile(customerId: string): Promise<CustomerProfile | undefined>;

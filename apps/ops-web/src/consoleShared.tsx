@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useCallback, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 
+import { clearProtectedImageCache } from './ProtectedImage';
 import { clearAdminToken, readAdminToken, saveAdminToken } from './lib/adminToken';
 import { opsBrand, opsBrandStyle } from './brand';
 
@@ -131,6 +132,7 @@ export function ConsoleLayout({
   badgeTitle,
   badgeDescription,
   storedToken,
+  onWarmTestStudio,
   onSignOut,
   children,
 }: {
@@ -141,6 +143,7 @@ export function ConsoleLayout({
   badgeTitle: string;
   badgeDescription: string;
   storedToken: string;
+  onWarmTestStudio?: () => void;
   onSignOut: () => void;
   children: ReactNode;
 }) {
@@ -169,7 +172,12 @@ export function ConsoleLayout({
             <NavLink className={({ isActive }) => `console-link${isActive ? ' active' : ''}`} end to="/">
               Dashboard
             </NavLink>
-            <NavLink className={({ isActive }) => `console-link${isActive ? ' active' : ''}`} to="/test-studio">
+            <NavLink
+              className={({ isActive }) => `console-link${isActive ? ' active' : ''}`}
+              to="/test-studio"
+              onPointerEnter={onWarmTestStudio}
+              onFocus={onWarmTestStudio}
+            >
               AI Test Studio
             </NavLink>
           </nav>
@@ -209,6 +217,7 @@ export function useAdminTokenState() {
   );
 
   const clearToken = useCallback(() => {
+    clearProtectedImageCache();
     clearAdminToken();
     setStoredToken('');
     setTokenDraft('');

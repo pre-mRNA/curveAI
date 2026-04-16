@@ -21,7 +21,6 @@ const authState = vi.hoisted(() => {
 });
 
 vi.mock('./lib/adminToken', () => ({
-  ADMIN_TOKEN_STORAGE_KEY: 'curve-ai.admin-token',
   readAdminToken: authState.readAdminToken,
   saveAdminToken: authState.saveAdminToken,
   clearAdminToken: authState.clearAdminToken,
@@ -138,7 +137,7 @@ describe('ops console', () => {
   });
 
   it('sends the admin token and surfaces rejected auth', async () => {
-    fetchMock.mockResolvedValueOnce(mockJsonResponse({ error: 'unauthorized' }, 401));
+    fetchMock.mockResolvedValueOnce(mockJsonResponse({ error: { message: 'unauthorized' } }, 401));
     const user = userEvent.setup();
 
     renderRoute('/');
