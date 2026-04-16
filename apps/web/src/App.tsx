@@ -31,54 +31,36 @@ function OnboardingLanding() {
   return (
     <div className="shell onboarding-shell landing-shell" style={onboardingBrandStyle}>
       <div className="container">
-        <header className="hero landing-hero">
-          <div className="eyebrow">{onboardingBrand.eyebrow}</div>
-          <h1>{onboardingBrand.heroTitle}</h1>
-          <p>{onboardingBrand.heroDescription}</p>
-          <div className="meta-row">
-            <span className="pill accent">10 minutes</span>
-            <span className="pill">Private link</span>
-            <span className="pill">Best done in one go</span>
+        <header className="hero landing-hero landing-hero-grid">
+          <div className="landing-hero-copy">
+            <div className="eyebrow">{onboardingBrand.eyebrow}</div>
+            <h1>{onboardingBrand.heroTitle}</h1>
+            <p>{onboardingBrand.heroDescription}</p>
+            <div className="meta-row">
+              <span className="pill accent">10 minutes</span>
+              <span className="pill">Private link</span>
+              <span className="pill">Best done in one go</span>
+            </div>
+          </div>
+
+          <div className="landing-hero-panel">
+            <div className="eyebrow">Before you start</div>
+            <h2>Have these three things ready.</h2>
+            <ul className="guide-list compact">
+              <li>Know the jobs you take and the jobs you do not want.</li>
+              <li>Know your normal pricing and when the assistant should ask you first.</li>
+              <li>Have your calendar handy and find a quiet spot for the voice sample.</li>
+            </ul>
           </div>
         </header>
 
         <div className="grid onboarding-grid landing-grid">
           <section className="stack">
-            <div className="card">
-              <div className="card-inner onboarding-stage">
-                <div className="eyebrow">What happens next</div>
-                <h2>Three quick steps.</h2>
-                <p className="muted">This private link sets up how the assistant talks, books, and handles your jobs.</p>
-                <div className="landing-step-grid">
-                  <div className="landing-step-card">
-                    <span className="landing-step-number">1</span>
-                    <strong>Say yes</strong>
-                    <div className="muted">Tick the boxes so setup can start.</div>
-                  </div>
-                  <div className="landing-step-card">
-                    <span className="landing-step-number">2</span>
-                    <strong>Answer questions</strong>
-                    <div className="muted">Tell us how you work and check the details.</div>
-                  </div>
-                    <div className="landing-step-card">
-                      <span className="landing-step-number">3</span>
-                      <strong>Calendar and voice</strong>
-                      <div className="muted">Connect your calendar and record your voice.</div>
-                    </div>
-                </div>
-                <div className="landing-assurance-row">
-                  <span className="pill">Use your phone or computer</span>
-                  <span className="pill">Check details before finish</span>
-                  <span className="pill">Come back on the same link if you stop</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
+            <div className="card card--primary">
               <div className="card-inner onboarding-stage">
                 <div className="eyebrow">Open the session</div>
-                <h2>Already have your invite code?</h2>
-                <p className="muted">Paste the code from your text or email to open your setup.</p>
+                <h2>Start with your invite code.</h2>
+                <p className="muted">Paste the code from your text or email. If you already started, use the same browser and link again.</p>
                 <form className="invite-entry-form" onSubmit={submitInviteCode}>
                   <label className="field" htmlFor="landing-invite-code">
                     <span>Invite code</span>
@@ -107,9 +89,45 @@ function OnboardingLanding() {
                     >
                       Start setup
                     </button>
-                    <span className="muted">If you already started, use the same browser and link again.</span>
+                    <span className="muted">Works on your phone or computer.</span>
                   </div>
                 </form>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-inner onboarding-stage">
+                <div className="eyebrow">What happens next</div>
+                <h2>Three quick steps.</h2>
+                <p className="muted">This private link sets up how the assistant talks, books, and handles your jobs.</p>
+                <div className="landing-step-grid">
+                  <div className="landing-step-card">
+                    <span className="landing-step-number">1</span>
+                    <div>
+                      <strong>Say yes</strong>
+                      <div className="muted">Tick the boxes so setup can start.</div>
+                    </div>
+                  </div>
+                  <div className="landing-step-card">
+                    <span className="landing-step-number">2</span>
+                    <div>
+                      <strong>Answer questions</strong>
+                      <div className="muted">Tell us how you work and check the details.</div>
+                    </div>
+                  </div>
+                  <div className="landing-step-card">
+                    <span className="landing-step-number">3</span>
+                    <div>
+                      <strong>Calendar and voice</strong>
+                      <div className="muted">Connect your calendar and record your voice.</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="landing-assurance-row">
+                  <span className="pill">Check details before finish</span>
+                  <span className="pill">Calendar opens in a new tab</span>
+                  <span className="pill">You only record at the voice step</span>
+                </div>
               </div>
             </div>
           </section>
@@ -118,11 +136,11 @@ function OnboardingLanding() {
             <div className="card">
               <div className="card-inner onboarding-sidebar">
                 <div className="eyebrow">{onboardingBrand.surfaceName}</div>
-                <h3>Have these ready.</h3>
+                <h3>What you will set up.</h3>
                 <ul className="guide-list">
-                  <li>Know the jobs you do and the jobs you do not want.</li>
-                  <li>Know your normal pricing and when the assistant should ask you first.</li>
-                  <li>Have your calendar handy and find a quiet spot for the voice sample.</li>
+                  <li>The jobs you want and the jobs you do not want.</li>
+                  <li>Your normal pricing and when the assistant should ask you first.</li>
+                  <li>Your calendar so bookings land in the right place.</li>
                 </ul>
               </div>
             </div>

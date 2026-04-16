@@ -1,23 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
-  buildCalendarConnectUrl,
-  disconnectCalendar,
   getJobCard,
   getStaffJobs,
   getStaffProfile,
-  savePricingInterview,
-  saveVoiceConsent,
+  launchStaffSetup,
 } from './api/client';
 import { staffBrand, staffBrandStyle } from './brand';
 import { ProtectedImage } from './ProtectedImage';
 import { testScenarios } from './testStudio';
-import type { JobCard, JobSummary, PricingProfile, StaffProfile } from './types';
+import type { JobCard, JobSummary, StaffProfile } from './types';
 
 type Tab = 'queue' | 'setup' | 'tests';
-
-const ONBOARDING_APP_URL = import.meta.env.VITE_ONBOARDING_APP_URL?.trim();
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-AU', {
     style: 'currency',
@@ -100,22 +94,59 @@ function profileCompletionScore(staff: StaffProfile | null) {
   };
 }
 
-function createPricingDraft(staff?: StaffProfile | null): PricingProfile {
-  return {
-    baseCalloutFee: staff?.pricingProfile?.baseCalloutFee ?? 180,
-    minimumJobPrice: staff?.pricingProfile?.minimumJobPrice ?? 160,
-    hourlyRate: staff?.pricingProfile?.hourlyRate ?? 145,
-    rushMultiplier: staff?.pricingProfile?.rushMultiplier ?? 1.35,
-    complexityMultiplier: staff?.pricingProfile?.complexityMultiplier ?? 1.2,
-    confidenceFloor: staff?.pricingProfile?.confidenceFloor ?? 0.68,
-  };
-}
-
 function nextSetupStep(profile: StaffProfile | null) {
+  const setup = profile?.setup;
+  if (setup?.status === 'completed') {
+    return {
+      title: 'Review your setup',
+      detail: 'Open the private setup page any time you want to check or update how the assistant works.',
+    };
+  }
+
+  if (setup?.status === 'in_progress') {
+    switch (setup.currentStep) {
+      case 'consent':
+        return {
+          title: 'Start the private setup',
+          detail: 'Open the setup page and say yes to the permissions so the interview can begin.',
+        };
+      case 'interview':
+        return {
+          title: 'Answer the setup questions',
+          detail: 'Keep going on the private setup page so the assistant learns your jobs and rules.',
+        };
+      case 'review':
+        return {
+          title: 'Check the business details',
+          detail: 'Review and fix the saved details before you move on to the calendar and voice steps.',
+        };
+      case 'calendar':
+        return {
+          title: 'Connect Microsoft calendar',
+          detail: 'Finish the calendar step on the private setup page so bookings can land in the right place.',
+        };
+      case 'voice_sample':
+        return {
+          title: 'Record the voice sample',
+          detail: 'Use the private setup page to upload the short voice sample before you finish.',
+        };
+      case 'finalize':
+        return {
+          title: 'Finish setup',
+          detail: 'The last step is ready. Open the private setup page and finish the flow.',
+        };
+      default:
+        return {
+          title: 'Continue setup',
+          detail: 'Open the private setup page and keep going from where you left off.',
+        };
+    }
+  }
+
   if (!profile || profile.voiceConsentStatus !== 'granted') {
     return {
-      title: 'Turn on voice',
-      detail: 'Let the assistant use your voice before you finish the rest of setup.',
+      title: 'Start setup',
+      detail: 'Open the private setup page to set your jobs, rules, calendar, and voice in one flow.',
     };
   }
 
@@ -134,9 +165,41 @@ function nextSetupStep(profile: StaffProfile | null) {
   }
 
   return {
-    title: 'Setup looks good',
-    detail: 'You can jump back to jobs. Update setup any time something changes.',
+    title: 'Continue setup',
+    detail: 'Open the private setup page to bring these details into the main setup flow.',
   };
+}
+
+function setupActionLabel(profile: StaffProfile | null) {
+  if (profile?.setup?.status === 'completed') {
+    return 'Review setup';
+  }
+  if (profile?.setup?.status === 'in_progress') {
+    return 'Continue setup';
+  }
+  return 'Start setup';
+}
+
+function setupStepLabel(profile: StaffProfile | null) {
+  const step = profile?.setup?.currentStep;
+  switch (step) {
+    case 'consent':
+      return 'Permissions';
+    case 'interview':
+      return 'Questions';
+    case 'review':
+      return 'Check details';
+    case 'calendar':
+      return 'Calendar';
+    case 'voice_sample':
+      return 'Voice sample';
+    case 'finalize':
+      return 'Finish';
+    case 'complete':
+      return 'Complete';
+    default:
+      return profile?.setup?.status === 'completed' ? 'Complete' : 'Not started';
+  }
 }
 
 const COMPACT_JOB_STATUS_LABEL: Record<JobSummary['status'], string> = {
@@ -167,10 +230,8 @@ export default function StaffShell({
   const [jobCardLoading, setJobCardLoading] = useState(false);
   const [jobCardError, setJobCardError] = useState<string | null>(null);
   const [profile, setProfile] = useState(staff);
-  const [pricingDraft, setPricingDraft] = useState(() => createPricingDraft(staff));
-  const [setupMessage, setSetupMessage] = useState<string | null>(null);
-  const [setupError, setSetupError] = useState<string | null>(null);
-  const [setupBusy, setSetupBusy] = useState<'voice' | 'calendar' | 'pricing' | null>(null);
+  const [setupLaunchBusy, setSetupLaunchBusy] = useState(false);
+  const [setupLaunchError, setSetupLaunchError] = useState<string | null>(null);
   const [copiedScenarioId, setCopiedScenarioId] = useState<string | null>(null);
   const [mobileQueueView, setMobileQueueView] = useState<'list' | 'detail'>('list');
   const [isDocumentVisible, setIsDocumentVisible] = useState(() =>
@@ -180,10 +241,6 @@ export default function StaffShell({
   const completion = profileCompletionScore(profile);
   const queuedCallbacks = useMemo(() => jobs.filter((job) => job.callback).length, [jobs]);
   const setupNext = nextSetupStep(profile);
-
-  useEffect(() => {
-    setPricingDraft(createPricingDraft(profile));
-  }, [profile]);
 
   useEffect(() => {
     selectedJobIdRef.current = selectedJobId;
@@ -326,28 +383,21 @@ export default function StaffShell({
     };
   }, [onSignOut, selectedJobId, selectedJobUpdatedAt]);
 
-  async function runSetupAction(action: 'voice' | 'calendar' | 'pricing', callback: () => Promise<StaffProfile>) {
-    setSetupBusy(action);
-    setSetupError(null);
-    setSetupMessage(null);
+  async function continueSetup() {
+    setSetupLaunchBusy(true);
+    setSetupLaunchError(null);
+
     try {
-      const nextProfile = await callback();
-      setProfile(nextProfile);
-      setSetupMessage(
-        action === 'voice'
-          ? 'Voice permission saved.'
-          : action === 'calendar'
-            ? 'Calendar updated.'
-            : 'Pricing saved.',
-      );
+      const result = await launchStaffSetup();
+      window.location.assign(result.launchUrl);
     } catch (error) {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         onSignOut();
         return;
       }
-      setSetupError(error instanceof Error ? error.message : 'Unable to save setup details');
+      setSetupLaunchError(error instanceof Error ? error.message : 'Could not open setup right now.');
     } finally {
-      setSetupBusy(null);
+      setSetupLaunchBusy(false);
     }
   }
 
@@ -674,7 +724,7 @@ export default function StaffShell({
                 <div className="section-header">
                   <div className="eyebrow">Readiness</div>
                   <h2>Finish setup</h2>
-                  <p className="muted">Use this page to finish the basics.</p>
+                  <p className="muted">The private setup page is now the main place to finish how the assistant works.</p>
                 </div>
                 <div className="setup-next-card">
                   <span className="label">Next best step</span>
@@ -715,205 +765,75 @@ export default function StaffShell({
                     </span>
                   </div>
                 </div>
-                {setupMessage ? <p className="pill good">{setupMessage}</p> : null}
-                {setupError ? <p className="pill warn">{setupError}</p> : null}
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-inner">
-                <div className="section-header">
-                  <div className="eyebrow">Voice</div>
-                  <h2>Voice permission</h2>
+                <div className="setup-next-card">
+                  <span className="label">Private setup flow</span>
+                  <strong>{setupStepLabel(profile)}</strong>
+                  <p className="muted">
+                    {profile.setup?.status === 'completed'
+                      ? 'Your main setup flow is complete. Open it again any time you want to review or change it.'
+                      : profile.setup?.status === 'in_progress'
+                        ? 'We will open the private setup page and continue from where you left off.'
+                        : 'We will open the private setup page and start from the first step.'}
+                  </p>
                 </div>
-                <p className="muted">Turn voice permission on or off here.</p>
-                <div className="action-row">
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() =>
-                      void runSetupAction('voice', () =>
-                        saveVoiceConsent({
-                          staffId: profile.id,
-                          consent: profile.voiceConsentStatus !== 'granted',
-                          signedBy: profile.fullName,
-                        }),
-                      )
-                    }
-                    disabled={setupBusy === 'voice'}
-                  >
-                    {setupBusy === 'voice'
-                      ? 'Saving...'
-                      : profile.voiceConsentStatus === 'granted'
-                        ? 'Turn off'
-                        : 'Turn on'}
+                <div className="button-row">
+                  <button className="button" type="button" onClick={() => void continueSetup()} disabled={setupLaunchBusy}>
+                    {setupLaunchBusy ? 'Opening setup...' : setupActionLabel(profile)}
                   </button>
-                  <span className="muted">Status: {voiceSetupLabel(profile.voiceConsentStatus)}</span>
                 </div>
-                {ONBOARDING_APP_URL ? (
-                  <a className="inline-link" href={ONBOARDING_APP_URL} target="_blank" rel="noreferrer">
-                    Open full setup page
-                  </a>
-                ) : null}
+                {setupLaunchError ? <p className="pill warn">{setupLaunchError}</p> : null}
               </div>
             </div>
 
             <div className="card">
               <div className="card-inner">
                 <div className="section-header">
-                  <div className="eyebrow">Calendar</div>
-                  <h2>Connect Microsoft calendar</h2>
+                  <div className="eyebrow">What happens on the setup page</div>
+                  <h2>One flow, not three separate forms</h2>
                 </div>
-                <p className="muted">
-                  Jobs can only book straight into your calendar after you finish the Microsoft sign-in step.
-                </p>
-                <div className="stack">
-                  <div className="setup-next-card">
-                    <span className="label">Status</span>
-                    <strong>{calendarSetupLabel(profile.calendarConnection)}</strong>
-                    <p className="muted">
-                      {profile.calendarConnection?.status === 'connected'
-                        ? profile.calendarConnection.accountEmail ?? profile.calendarConnection.calendarLabel ?? 'Connected'
-                        : profile.calendarConnection?.status === 'pending'
-                          ? 'Finish the Microsoft sign-in page, then come back here.'
-                          : profile.calendarConnection?.status === 'error'
-                            ? profile.calendarConnection.lastError ?? 'The last calendar attempt failed.'
-                            : 'Link the calendar where booked jobs should land.'}
-                    </p>
-                  </div>
-                  {profile.calendarConnection?.connectedAt ? (
-                    <div className="readiness-list">
-                      <div className="readiness-item">
-                        <strong>Account</strong>
-                        <span>{profile.calendarConnection.accountEmail ?? 'Not saved yet'}</span>
-                      </div>
-                      <div className="readiness-item">
-                        <strong>Calendar</strong>
-                        <span>{profile.calendarConnection.calendarLabel ?? profile.calendarConnection.calendarId ?? 'Primary'}</span>
-                      </div>
-                      <div className="readiness-item">
-                        <strong>Timezone</strong>
-                        <span>{profile.calendarConnection.timezone ?? profile.timezone ?? 'Australia/Sydney'}</span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="button-row">
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => {
-                        setSetupMessage('Opening Microsoft sign-in…');
-                        window.location.assign(buildCalendarConnectUrl(profile.id));
-                      }}
-                    >
-                      {profile.calendarConnection?.status === 'connected' ? 'Reconnect calendar' : 'Connect Microsoft'}
-                    </button>
-                    {profile.calendarConnection?.connectedAt ? (
-                      <button
-                        className="button secondary"
-                        type="button"
-                        disabled={setupBusy === 'calendar'}
-                        onClick={() => void runSetupAction('calendar', () => disconnectCalendar(profile.id))}
-                      >
-                        {setupBusy === 'calendar' ? 'Disconnecting...' : 'Disconnect'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+                <ul className="guide-list compact">
+                  <li>Answer the setup questions so the assistant learns your jobs, rules, and tone.</li>
+                  <li>Check the details before anything is saved as your working setup.</li>
+                  <li>Connect the calendar and upload the voice sample in the same flow.</li>
+                </ul>
               </div>
             </div>
 
             <div className="card">
               <div className="card-inner">
                 <div className="section-header">
-                  <div className="eyebrow">Pricing</div>
-                  <h2>Set your starting prices</h2>
+                  <div className="eyebrow">Current details</div>
+                  <h2>What is already on file</h2>
                 </div>
-                <form
-                  className="stack"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void runSetupAction('pricing', async () => {
-                      const result = await savePricingInterview({
-                        staffId: profile.id,
-                        responses: pricingDraft,
-                      });
-                      return {
-                        ...result.staff,
-                        pricingProfile: result.pricingProfile,
-                      };
-                    });
-                  }}
-                >
                   <div className="field-grid">
-                    <label className="field">
-                      <span>Base callout fee</span>
-                      <input
-                        type="number"
-                        value={pricingDraft.baseCalloutFee}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, baseCalloutFee: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Minimum job price</span>
-                      <input
-                        type="number"
-                        value={pricingDraft.minimumJobPrice}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, minimumJobPrice: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Hourly rate</span>
-                      <input
-                        type="number"
-                        value={pricingDraft.hourlyRate}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, hourlyRate: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Rush multiplier</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={pricingDraft.rushMultiplier}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, rushMultiplier: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Complexity multiplier</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={pricingDraft.complexityMultiplier}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, complexityMultiplier: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Confidence floor</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={pricingDraft.confidenceFloor}
-                        onChange={(event) =>
-                          setPricingDraft((current) => ({ ...current, confidenceFloor: Number(event.target.value) || 0 }))
-                        }
-                      />
-                    </label>
+                    <div className="readiness-item">
+                      <strong>Voice</strong>
+                      <span>{voiceSetupLabel(profile.voiceConsentStatus)}</span>
+                    </div>
+                    <div className="readiness-item">
+                      <strong>Calendar</strong>
+                      <span>{calendarSetupLabel(profile.calendarConnection)}</span>
+                    </div>
+                    <div className="readiness-item">
+                      <strong>Pricing</strong>
+                      <span>{profile.pricingProfile ? formatCurrency(profile.pricingProfile.baseCalloutFee) : 'Not set'}</span>
+                    </div>
+                    <div className="readiness-item">
+                      <strong>Calendar account</strong>
+                      <span>{profile.calendarConnection?.accountEmail ?? 'Not connected yet'}</span>
+                    </div>
+                    <div className="readiness-item">
+                      <strong>Calendar name</strong>
+                      <span>{profile.calendarConnection?.calendarLabel ?? profile.calendarConnection?.calendarId ?? 'Primary'}</span>
+                    </div>
+                    <div className="readiness-item">
+                      <strong>Timezone</strong>
+                      <span>{profile.calendarConnection?.timezone ?? profile.timezone ?? 'Australia/Sydney'}</span>
+                    </div>
                   </div>
-                  <button className="button" type="submit" disabled={setupBusy === 'pricing'}>
-                    {setupBusy === 'pricing' ? 'Saving...' : 'Save pricing'}
-                  </button>
-                </form>
+                  <p className="muted">
+                    These details stay visible here, but changes now happen through the private setup flow so the assistant only has one source of truth.
+                  </p>
               </div>
             </div>
           </section>

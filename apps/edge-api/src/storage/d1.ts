@@ -819,6 +819,14 @@ export class D1OnboardingRepository implements OnboardingRepository {
     return row ? toInvite(row) : undefined;
   }
 
+  async getLatestInviteByStaffId(staffId: string): Promise<InviteRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM onboarding_invites WHERE staff_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(staffId)
+      .first<InviteRow>();
+    return row ? toInvite(row) : undefined;
+  }
+
   async saveSession(session: OnboardingSessionRecord): Promise<void> {
     await this.db
       .prepare(

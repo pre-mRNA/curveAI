@@ -126,8 +126,10 @@ export async function savePricingInterview(
   return payload;
 }
 
-export function buildCalendarConnectUrl(staffId: string): string {
-  return `${API_BASE_URL}/staff/calendar/microsoft/start?staffId=${encodeURIComponent(staffId)}`;
+export async function launchStaffSetup(): Promise<{ launchUrl: string }> {
+  return requestJson<{ ok: true; launchUrl: string; setup: unknown }>('/staff/setup/launch', {
+    method: 'POST',
+  });
 }
 
 export async function disconnectCalendar(staffId: string): Promise<StaffProfile> {

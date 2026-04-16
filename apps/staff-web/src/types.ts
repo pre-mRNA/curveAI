@@ -21,6 +21,15 @@ export interface PricingProfile {
   confidenceFloor: number;
 }
 
+export type StaffSetupStatus = 'not_started' | 'in_progress' | 'completed';
+export type StaffSetupStep = 'consent' | 'interview' | 'review' | 'calendar' | 'voice_sample' | 'finalize' | 'complete';
+
+export interface StaffSetupSummary {
+  status: StaffSetupStatus;
+  currentStep?: StaffSetupStep;
+  updatedAt?: string;
+}
+
 export interface StaffProfile {
   id: string;
   fullName: string;
@@ -38,6 +47,7 @@ export interface StaffProfile {
   otpVerifiedAt?: string;
   calendarConnection?: CalendarConnection;
   pricingProfile?: PricingProfile;
+  setup?: StaffSetupSummary;
 }
 
 export interface PhotoAsset {

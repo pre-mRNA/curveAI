@@ -9,6 +9,7 @@ import type {
   OnboardingChecklistPrompt,
   OnboardingSessionRecord,
   OnboardingSessionSummary,
+  StaffRecord,
   VoiceSampleAssessment,
 } from "./models.js";
 import { createDefaultAnalysis, normalizeReview } from "./models.js";
@@ -91,6 +92,31 @@ export class OnboardingService {
         email: invite.email,
         phoneNumber: invite.phoneNumber,
       },
+    };
+  }
+
+  async launchForStaff(staff: StaffRecord): Promise<{ summary: OnboardingSessionSummary; participantToken: string; url: string }> {
+    let invite = await this.options.repo.getLatestInviteByStaffId(staff.id);
+    if (!invite || isExpired(invite.expiresAt) || invite.status === "completed") {
+      invite = await this.createInviteForStaff(staff);
+    }
+
+    const activeSession = invite.sessionId ? await this.options.repo.getSessionById(invite.sessionId) : undefined;
+    if (activeSession && !isExpired(activeSession.expiresAt) && activeSession.status !== "completed") {
+      const resumed = await this.issueSessionAccessToken(activeSession);
+      return {
+        ...resumed,
+        url: this.inviteUrl(invite.code),
+      };
+    }
+
+    const started = await this.startSession(invite.code);
+    if (!started) {
+      throw new OnboardingRuleError("Could not start the setup session for this staff profile.", 500);
+    }
+    return {
+      ...started,
+      url: this.inviteUrl(invite.code),
     };
   }
 
@@ -186,6 +212,42 @@ export class OnboardingService {
     if (isExpired(session.expiresAt)) {
       throw new OnboardingRuleError("This onboarding session has expired.", 410);
     }
+  }
+
+  private async createInviteForStaff(staff: StaffRecord): Promise<InviteRecord> {
+    const now = new Date();
+    const invite: InviteRecord = {
+      id: createId("invite"),
+      code: createInviteCode(),
+      staffId: staff.id,
+      fullName: staff.fullName,
+      email: staff.email,
+      phoneNumber: staff.phoneNumber,
+      role: staff.role,
+      status: "pending",
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+    };
+    await this.options.repo.createInvite(invite);
+    return invite;
+  }
+
+  private inviteUrl(inviteCode: string): string {
+    return new URL(`/onboard/${inviteCode}`, this.options.config.publicOnboardingAppUrl).toString();
+  }
+
+  private async issueSessionAccessToken(
+    session: OnboardingSessionRecord,
+  ): Promise<{ summary: OnboardingSessionSummary; participantToken: string }> {
+    const participantToken = createParticipantToken();
+    session.participantTokenHash = await sha256Hex(participantToken);
+    session.updatedAt = new Date().toISOString();
+    await this.options.repo.saveSession(session);
+    const turns = await this.options.repo.listTurns(session.id);
+    return {
+      summary: this.toSessionSummary(session, turns, participantToken),
+      participantToken,
+    };
   }
 
   async provisionRealtimeVoice(

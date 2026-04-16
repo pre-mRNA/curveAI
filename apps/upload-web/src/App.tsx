@@ -29,20 +29,27 @@ function UploadLanding() {
               <span className="pill">Private text link</span>
               <span className="pill">Phone friendly</span>
             </div>
+            <div className="hero-callout">
+              Open the text from your tradie or office, tap the link, and send the photos from your phone.
+            </div>
           </div>
-          <div className="hero-card">
-            <span className="pill accent">{uploadBrand.badgeLabel}</span>
-            <strong>{uploadBrand.badgeTitle}</strong>
-            <p className="muted">{uploadBrand.badgeDescription}</p>
+          <div className="hero-card hero-card--practical">
+            <div className="section-label">What to send</div>
+            <strong>Start wide, then show the problem close up.</strong>
+            <ul className="tip-list compact">
+              <li>Show the whole area first.</li>
+              <li>Then show the leak, damage, label, or blocked part.</li>
+              <li>Send a few photos together if you can.</li>
+            </ul>
           </div>
         </header>
 
         <div className="upload-landing-grid">
-            <div className="card">
-              <div className="card-inner">
+          <div className="card card--primary">
+            <div className="card-inner">
               <div className="section-label">How it works</div>
               <h2>Open the link from the text and send the photos.</h2>
-              <p className="muted">This page is only for the job in that message.</p>
+              <p className="muted">The link only works for the job in that message, so it is safe to send the photos there.</p>
               <div className="landing-guide-list">
                 <div className="landing-guide-item">
                   <strong>1. Open the text on your phone</strong>
@@ -60,19 +67,18 @@ function UploadLanding() {
             </div>
           </div>
 
-            <div className="card">
-              <div className="card-inner">
+          <div className="card">
+            <div className="card-inner">
               <div className="section-label">Before you start</div>
-              <h2>Best photos to send</h2>
+              <h2>Why this helps</h2>
               <ul className="tip-list">
-                <li>Show the whole area first.</li>
-                <li>Then add close-ups of leaks, damage, labels, or blocked parts.</li>
-                <li>Use good light if you can.</li>
                 <li>The page shows who asked for the photos and what job they are for.</li>
+                <li>Good photos can help the tradie quote the job before they arrive.</li>
+                <li>They can also help the tradie bring the right parts the first time.</li>
               </ul>
-              <p className="muted">These photos help the tradie quote the job or arrive ready.</p>
-              </div>
+              <p className="muted">A few clear photos now usually saves time later.</p>
             </div>
+          </div>
         </div>
       </div>
     </div>

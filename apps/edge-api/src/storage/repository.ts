@@ -122,6 +122,7 @@ export interface OnboardingRepository {
   saveInvite(invite: InviteRecord): Promise<void>;
   getInviteByCode(code: string): Promise<InviteRecord | undefined>;
   getInviteById(id: string): Promise<InviteRecord | undefined>;
+  getLatestInviteByStaffId(staffId: string): Promise<InviteRecord | undefined>;
   saveSession(session: OnboardingSessionRecord): Promise<void>;
   getSessionById(id: string): Promise<OnboardingSessionRecord | undefined>;
   getSessionByCalendarState(state: string): Promise<OnboardingSessionRecord | undefined>;

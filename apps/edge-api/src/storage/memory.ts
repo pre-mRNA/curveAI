@@ -231,6 +231,13 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     return invite ? clone(invite) : undefined;
   }
 
+  async getLatestInviteByStaffId(staffId: string): Promise<InviteRecord | undefined> {
+    const invites = [...this.invites.values()]
+      .filter((invite) => invite.staffId === staffId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return invites[0] ? clone(invites[0]) : undefined;
+  }
+
   async saveSession(session: OnboardingSessionRecord): Promise<void> {
     this.sessions.set(session.id, clone(session));
   }

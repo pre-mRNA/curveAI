@@ -3,3 +3,4 @@ export * from "./branding.js";
 export * from "./blobPromiseCache.js";
 export * from "./browserWarmup.js";
 export * from "./onboarding.js";
+export * from "./publicShell.js";

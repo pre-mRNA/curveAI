@@ -956,6 +956,97 @@ export function createApp(options?: {
     providers: aiTestProviders,
   });
 
+  type StaffSetupSummary = {
+    status: "not_started" | "in_progress" | "completed";
+    currentStep?: "consent" | "interview" | "review" | "calendar" | "voice_sample" | "finalize" | "complete";
+    updatedAt?: string;
+  };
+
+  function currentStepFromSessionState(input: {
+    status: OnboardingSessionRecord["status"];
+    consentAccepted: boolean;
+    calendar?: OnboardingSessionRecord["calendar"];
+    voiceSample?: OnboardingSessionRecord["voiceSample"];
+  }): StaffSetupSummary["currentStep"] {
+    switch (input.status) {
+      case "completed":
+        return "complete";
+      case "voice_sample":
+        return input.voiceSample ? "finalize" : "voice_sample";
+      case "calendar":
+        return input.calendar?.status === "connected" ? "voice_sample" : "calendar";
+      case "review":
+        return "review";
+      case "interviewing":
+        return "interview";
+      default:
+        return input.consentAccepted ? "interview" : "consent";
+    }
+  }
+
+  async function buildStaffSetupSummary(staff: StaffRecord): Promise<StaffSetupSummary> {
+    const invite = await repo.getLatestInviteByStaffId(staff.id);
+    const session = invite?.sessionId ? await repo.getSessionById(invite.sessionId) : undefined;
+    if (session && !isExpired(session.expiresAt) && session.status !== "completed") {
+      return {
+        status: "in_progress",
+        currentStep: currentStepFromSessionState(session),
+        updatedAt: session.updatedAt,
+      };
+    }
+
+    if (session?.status === "completed") {
+      return {
+        status: "completed",
+        currentStep: "complete",
+        updatedAt: session.updatedAt,
+      };
+    }
+
+    const legacyReady =
+      staff.voiceConsentStatus === "granted" &&
+      staff.calendarConnection?.status === "connected" &&
+      Boolean(staff.pricingProfile);
+    if (legacyReady) {
+      return {
+        status: "completed",
+        currentStep: "complete",
+        updatedAt: staff.updatedAt,
+      };
+    }
+
+    const hasLegacySetupSignals =
+      staff.voiceConsentStatus === "granted" ||
+      Boolean(staff.calendarConnection) ||
+      Boolean(staff.pricingProfile) ||
+      Boolean(invite);
+
+    if (hasLegacySetupSignals) {
+      return {
+        status: "in_progress",
+        currentStep: "review",
+        updatedAt: session?.updatedAt ?? staff.updatedAt,
+      };
+    }
+
+    return {
+      status: "not_started",
+      currentStep: "consent",
+      updatedAt: staff.updatedAt,
+    };
+  }
+
+  async function sanitizeStaffWithSetup(staff: StaffRecord | undefined) {
+    const safeStaff = sanitizeStaff(staff);
+    if (!safeStaff || !staff) {
+      return undefined;
+    }
+    return {
+      ...safeStaff,
+      setup: await buildStaffSetupSummary(staff),
+    };
+  }
+
   function hasAdminAccess(request: Request): boolean {
     const token = getAdminAccessToken(request);
     return Boolean(token && config.adminToken && constantTimeEqual(token, config.adminToken));
@@ -1742,7 +1833,7 @@ export function createApp(options?: {
     const verifiedStaff = await repo.getStaff(staff.id);
     const response = c.json({
       ok: true,
-      staff: sanitizeStaff(verifiedStaff ?? staff),
+      staff: await sanitizeStaffWithSetup(verifiedStaff ?? staff),
       session: {
         expiresAt,
       },
@@ -1768,8 +1859,47 @@ export function createApp(options?: {
     }
     return c.json({
       ok: true,
-      staff: sanitizeStaff(staff),
+      staff: await sanitizeStaffWithSetup(staff),
     });
+  });
+
+  app.post("/staff/setup/launch", async (c) => {
+    const actor = await authenticateActor(c);
+    if (!actor) {
+      return jsonError(c, 401, "Authentication is required");
+    }
+    if (actor.kind === "admin") {
+      return jsonError(c, 400, "Admin tokens do not map to a single staff setup flow");
+    }
+    const staff = await repo.getStaff(actor.staffId);
+    if (!staff) {
+      return jsonError(c, 404, "Staff not found");
+    }
+
+    const launched = await onboardingService.launchForStaff(staff);
+    const maxAgeSeconds = Math.max(
+      60,
+      Math.floor((new Date(launched.summary.expiresAt).getTime() - Date.now()) / 1000),
+    );
+    const response = c.json({
+      ok: true,
+      launchUrl: launched.url,
+      setup: {
+        status: launched.summary.status === "completed" ? "completed" : "in_progress",
+        currentStep: currentStepFromSessionState({
+          status: launched.summary.status,
+          consentAccepted: launched.summary.consentAccepted,
+          calendar: launched.summary.calendar,
+          voiceSample: launched.summary.voiceSample,
+        }),
+        updatedAt: launched.summary.updatedAt,
+      },
+    });
+    response.headers.append(
+      "set-cookie",
+      buildSessionCookie(ONBOARDING_SESSION_COOKIE, launched.participantToken, maxAgeSeconds, c.req.url),
+    );
+    return response;
   });
 
   app.post("/staff/sign-out", async (c) => {

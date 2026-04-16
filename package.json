@@ -20,6 +20,7 @@
     "deploy:pages:upload": "node scripts/deploy-pages-app.mjs apps/upload-web @curve-ai/upload-web curve-ai-upload",
     "deploy:pages:all": "npm run deploy:pages:onboarding && npm run deploy:pages:ops && npm run deploy:pages:staff && npm run deploy:pages:upload",
     "bootstrap:cloudflare:staging": "node scripts/bootstrap-cloudflare-staging.mjs",
+    "bootstrap:cloudflare:access": "node scripts/bootstrap-cloudflare-access.mjs",
     "secrets:cloudflare:staging": "node scripts/set-cloudflare-staging-secrets.mjs",
     "smoke:cloudflare:staging": "node scripts/smoke-cloudflare-staging.mjs",
     "deploy:cloudflare:staging": "npm run deploy:edge-api && npm run deploy:pages:all",

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { onboardingBrand, onboardingBrandStyle } from '../brand';
+import { PublicActionCard, PublicFactStrip, PublicSidePanel } from '../../../../packages/shared/src/publicShell';
 import type {
   CalendarConnectResponse,
   OnboardingConsentPayload,
@@ -752,23 +753,21 @@ export default function OnboardingPage() {
           </div>
         </header>
 
-        <div className="card stage-card">
+        <div className="card stage-card stage-card--summary">
           <div className="card-inner stage-card-inner">
             <div className="stage-copy">
               <div className="eyebrow">Right now</div>
               <h2>{activeStepGuide.title}</h2>
               <p className="muted">{activeStepGuide.detail}</p>
             </div>
-            <div className="stage-meta">
-              <div className="stage-metric">
-                <span className="muted">Do this now</span>
-                <strong>{activeStep.label}</strong>
-              </div>
-              <div className="stage-metric">
-                <span className="muted">Then this</span>
-                <strong>{nextStep?.label ?? 'Complete'}</strong>
-              </div>
-            </div>
+            <PublicFactStrip
+              className="stage-fact-strip"
+              facts={[
+                { label: 'Do this now', value: activeStep.label, tone: 'accent' },
+                { label: 'Then this', value: nextStep?.label ?? 'Complete' },
+                { label: 'Progress', value: `${activeStepIndex + 1} of ${VISIBLE_STEPS.length}` },
+              ]}
+            />
           </div>
         </div>
 
@@ -787,11 +786,12 @@ export default function OnboardingPage() {
         <div className="grid onboarding-grid">
           <section className="stack">
             {currentStep === 'consent' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Permissions</div>
-                  <h2>Say yes to these three things first.</h2>
-                  <p className="muted">This lets us set up the assistant properly and saves you doing it again later.</p>
+              <PublicActionCard
+                eyebrow="Permissions"
+                title="Say yes to these three things first."
+                description="This lets us set up the assistant properly and saves you doing it again later."
+                className="onboarding-stage-card"
+              >
                   <div className="support-grid">
                     <div className="support-card">
                       <strong>What this setup covers</strong>
@@ -853,16 +853,16 @@ export default function OnboardingPage() {
                   </form>
 
                   {bootstrapError ? <p className="pill warn">{bootstrapError}</p> : null}
-                </div>
-              </div>
+              </PublicActionCard>
             ) : null}
 
             {currentStep === 'interview' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Questions</div>
-                  <h2>Answer a few questions.</h2>
-                  <p className="muted">Keep it simple. Type it how you would say it on the phone.</p>
+              <PublicActionCard
+                eyebrow="Questions"
+                title="Answer a few questions."
+                description="Keep it simple. Type it how you would say it on the phone."
+                className="onboarding-stage-card"
+              >
 
                   <div className="conversation-card">
                     <div className="conversation-header">
@@ -918,16 +918,16 @@ export default function OnboardingPage() {
                       <p className="muted">Your answers will show here after you save the first one.</p>
                     )}
                   </div>
-                </div>
-              </div>
+              </PublicActionCard>
             ) : null}
 
             {currentStep === 'review' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Check details</div>
-                  <h2>Make sure these details look right.</h2>
-                  <p className="muted">Fix anything wrong before you move on.</p>
+              <PublicActionCard
+                eyebrow="Check details"
+                title="Make sure these details look right."
+                description="Fix anything wrong before you move on."
+                className="onboarding-stage-card"
+              >
 
                   {!review && !reviewLoading ? (
                     <div className="inline-actions">
@@ -1028,16 +1028,16 @@ export default function OnboardingPage() {
                       </button>
                     </div>
                   </div>
-                </div>
-              </div>
+              </PublicActionCard>
             ) : null}
 
             {currentStep === 'calendar' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Calendar</div>
-                  <h2>Connect your calendar.</h2>
-                  <p className="muted">Tap the button below. Microsoft opens in a new tab. When you finish there, come back here and check again.</p>
+              <PublicActionCard
+                eyebrow="Calendar"
+                title="Connect your calendar."
+                description="Tap the button below. Microsoft opens in a new tab. When you finish there, come back here and check again."
+                className="onboarding-stage-card"
+              >
                   <div className="support-card">
                     <strong>Quick steps</strong>
                     <ul className="guide-list compact">
@@ -1080,16 +1080,16 @@ export default function OnboardingPage() {
                       </div>
                     ) : null}
                   </div>
-                </div>
-              </div>
+              </PublicActionCard>
             ) : null}
 
             {currentStep === 'voice_sample' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Voice</div>
-                  <h2>Record a short voice sample.</h2>
-                  <p className="muted">Use your microphone and say it in your normal voice. Aim for about 20 to 30 seconds in a quiet spot.</p>
+              <PublicActionCard
+                eyebrow="Voice"
+                title="Record a short voice sample."
+                description="Use your microphone and say it in your normal voice. Aim for about 20 to 30 seconds in a quiet spot."
+                className="onboarding-stage-card"
+              >
                   <div className="support-card">
                     <strong>A good sample is simple</strong>
                     <ul className="guide-list compact">
@@ -1138,23 +1138,23 @@ export default function OnboardingPage() {
 
                   {voiceError ? <p className="pill warn">{voiceError}</p> : null}
 
-                  {session?.voiceSampleUploaded ? (
-                    <div className="inline-actions">
-                      <button className="button" type="button" onClick={() => setCurrentStep('finalize')}>
+                    {session?.voiceSampleUploaded ? (
+                      <div className="inline-actions">
+                        <button className="button" type="button" onClick={() => setCurrentStep('finalize')}>
                         Next: finish
                       </button>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+                      </div>
+                    ) : null}
+              </PublicActionCard>
             ) : null}
 
             {currentStep === 'finalize' ? (
-              <div className="card">
-                <div className="card-inner onboarding-stage">
-                  <div className="eyebrow">Finish</div>
-                  <h2>Finish setup.</h2>
-                  <p className="muted">You can finish once the calendar and voice sample are both done.</p>
+              <PublicActionCard
+                eyebrow="Finish"
+                title="Finish setup."
+                description="You can finish once the calendar and voice sample are both done."
+                className="onboarding-stage-card"
+              >
 
                   <div className="review-summary card">
                     <div className="card-inner">
@@ -1173,54 +1173,43 @@ export default function OnboardingPage() {
                   </div>
 
                   {voiceError ? <p className="pill warn">{voiceError}</p> : null}
-                </div>
-              </div>
+              </PublicActionCard>
             ) : null}
           </section>
 
           <aside className="stack">
-            <div className="card">
-              <div className="card-inner onboarding-sidebar">
-                <div className="eyebrow">Setup so far</div>
-                <h3>{session?.staffName || 'Your setup'}</h3>
-                <p className="muted">
-                  {session?.summary || 'This shows what is done and what is left.'}
-                </p>
-
-                <div className="snapshot-grid">
-                  <div className="stat">
-                    <span className="muted">Answers</span>
-                    <strong>{transcript.length}</strong>
-                  </div>
-                  <div className="stat">
-                    <span className="muted">Details</span>
-                    <strong>{review?.confidence ?? 'waiting'}</strong>
-                  </div>
-                  <div className="stat">
-                    <span className="muted">Calendar</span>
-                    <strong>{session?.calendarConnected ? 'Done' : 'Waiting'}</strong>
-                  </div>
-                  <div className="stat">
-                    <span className="muted">Voice</span>
-                    <strong>{session?.voiceSampleUploaded ? 'Done' : 'Waiting'}</strong>
-                  </div>
+            <PublicSidePanel eyebrow="Setup so far" title={session?.staffName || 'Your setup'}>
+              <p className="muted">
+                {session?.summary || 'This shows what is done and what is left.'}
+              </p>
+              <div className="snapshot-grid">
+                <div className="stat">
+                  <span className="muted">Answers</span>
+                  <strong>{transcript.length}</strong>
                 </div>
-
+                <div className="stat">
+                  <span className="muted">Details</span>
+                  <strong>{review?.confidence ?? 'waiting'}</strong>
+                </div>
+                <div className="stat">
+                  <span className="muted">Calendar</span>
+                  <strong>{session?.calendarConnected ? 'Done' : 'Waiting'}</strong>
+                </div>
+                <div className="stat">
+                  <span className="muted">Voice</span>
+                  <strong>{session?.voiceSampleUploaded ? 'Done' : 'Waiting'}</strong>
+                </div>
               </div>
-            </div>
+            </PublicSidePanel>
 
-            <div className="card">
-              <div className="card-inner onboarding-sidebar">
-                <div className="eyebrow">What this setup gives you</div>
-                <h3>By the time you finish</h3>
-                <ul className="guide-list">
-                  <li>The assistant knows the jobs you take and the ones you avoid.</li>
-                  <li>It uses the pricing and handoff rules you save here.</li>
-                  <li>It can book into the calendar you connect.</li>
-                  <li>It can sound more like you after the voice step.</li>
-                </ul>
-              </div>
-            </div>
+            <PublicSidePanel eyebrow="What this setup gives you" title="By the time you finish">
+              <ul className="guide-list">
+                <li>The assistant knows the jobs you take and the ones you avoid.</li>
+                <li>It uses the pricing and handoff rules you save here.</li>
+                <li>It can book into the calendar you connect.</li>
+                <li>It can sound more like you after the voice step.</li>
+              </ul>
+            </PublicSidePanel>
           </aside>
         </div>
       </div>

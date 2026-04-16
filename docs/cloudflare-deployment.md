@@ -67,6 +67,9 @@ Browser auth for onboarding and staff now relies on Worker-issued `HttpOnly` ses
 Use these env vars for migration and deploy scripts:
 
 - `CLOUDFLARE_API_TOKEN` - account-scoped token with D1, R2, Workers, and Pages edit permissions
+- `CLOUDFLARE_ACCESS_ALLOWED_EMAILS` - optional comma-separated email allowlist for Cloudflare Access bootstrap
+- `CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS` - optional comma-separated email-domain allowlist for Cloudflare Access bootstrap
+- `CLOUDFLARE_ACCESS_SESSION_DURATION` - optional Access session duration, defaults to `24h`
 - `CLOUDFLARE_ACCOUNT_ID` - target Cloudflare account id
 - `CLOUDFLARE_WORKERS_SUBDOMAIN` - preferred workers.dev subdomain when the account has not been initialized yet
 - `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
@@ -98,6 +101,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - If Access is not configured yet, set `REVIEW_PASSCODE` and `REVIEW_COOKIE_SECRET` on each Pages project to enable the fallback review gate.
 - That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
 - The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
+- The Access bootstrap flow also fails closed: it refuses to create review apps unless at least one explicit email or email-domain allowlist env var is set.
 - The four Pages apps now import one shared review-gate implementation from the repo root, and `npm run test:pages-gate` exercises the fail-closed, asset-blocking, cookie-issuance, and logout paths centrally.
 - Worker route families are now origin-fenced by app surface:
   - `/dashboard` and `/ai-test-studio/*` only accept the ops origin
@@ -114,6 +118,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
 - For Worker deploys, the checked-in `apps/edge-api/wrangler.jsonc` stays template-like and `npm run deploy:edge-api` renders a temporary config from `CLOUDFLARE_D1_DATABASE_ID` before calling `wrangler deploy`.
 - `npm run bootstrap:cloudflare:staging` now provisions the workers.dev subdomain, D1 database, R2 bucket, and Pages projects idempotently from the Cloudflare API and `wrangler`.
+- `npm run bootstrap:cloudflare:access` provisions or updates one self-hosted Cloudflare Access app per staging host when the API token also has `Access: Apps and Policies Write`.
 - Pass `--write-wrangler` to `npm run bootstrap:cloudflare:staging -- --write-wrangler` if you want it to update the checked-in staging Worker config with the discovered D1 id and live worker URL.
 - `npm run secrets:cloudflare:staging` pushes Worker secrets plus the fallback Pages review-gate secrets from your shell env into Cloudflare.
 - `npm run smoke:cloudflare:staging` checks the live Worker `/health` endpoint plus the Pages review gates and optional passcode unlock flow.

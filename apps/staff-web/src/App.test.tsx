@@ -143,4 +143,81 @@ describe('staff web app', () => {
     expect(screen.getByText(/current price/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it('opens the canonical setup flow from the setup tab', async () => {
+    const assignMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        assign: assignMock,
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith('/staff/me')) {
+        return jsonResponse({ error: { message: 'Authentication is required' } }, { status: 401 });
+      }
+
+      if (url.endsWith('/staff/verify-otp')) {
+        return jsonResponse({
+          staff: {
+            id: 'staff_1',
+            fullName: 'Jordan Tradie',
+            role: 'Owner',
+            voiceConsentStatus: 'pending',
+            timezone: 'Australia/Sydney',
+            setup: {
+              status: 'in_progress',
+              currentStep: 'review',
+            },
+          },
+          session: {
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          },
+        });
+      }
+
+      if (url.endsWith('/jobs')) {
+        return jsonResponse({ jobs: [] });
+      }
+
+      if (url.endsWith('/staff/setup/launch')) {
+        expect(init?.method).toBe('POST');
+        return jsonResponse({
+          ok: true,
+          launchUrl: 'https://curve-ai-onboarding.pages.dev/onboard/invite_123',
+          setup: {
+            status: 'in_progress',
+            currentStep: 'review',
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('heading', { name: /^sign in$/i });
+
+    await user.type(screen.getByLabelText(/invite code/i), 'invite-token');
+    await user.type(screen.getByLabelText(/6 digit code/i), '123456');
+    await user.click(screen.getByRole('button', { name: /open jobs/i }));
+
+    await screen.findByRole('heading', { name: /your jobs/i });
+    await user.click(screen.getByRole('button', { name: /setup/i }));
+
+    expect(screen.getByText(/the private setup page is now the main place to finish how the assistant works/i)).toBeInTheDocument();
+    expect(screen.getByText(/check details/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /continue setup/i }));
+
+    await waitFor(() => {
+      expect(assignMock).toHaveBeenCalledWith('https://curve-ai-onboarding.pages.dev/onboard/invite_123');
+    });
+  });
 });

@@ -1559,10 +1559,12 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   });
   assert.equal(meResponse.status, 200);
   const meBody = (await meResponse.json()) as {
-    staff: { id: string; voiceConsentStatus: string };
+    staff: { id: string; voiceConsentStatus: string; setup?: { status?: string; currentStep?: string } };
   };
   assert.equal(meBody.staff.id, inviteBody.staff.id);
   assert.equal(meBody.staff.voiceConsentStatus, "pending");
+  assert.equal(meBody.staff.setup?.status, "not_started");
+  assert.equal(meBody.staff.setup?.currentStep, "consent");
 
   const calendarResponse = await app.request("/staff/calendar/connect", {
     method: "POST",
@@ -1684,6 +1686,76 @@ test("staff invite verification and staff-scoped job access work on the Worker",
     },
   });
   assert.equal(revokedMeResponse.status, 401);
+});
+
+test("staff setup launch creates or resumes a canonical onboarding session", async () => {
+  const app = createTestApp();
+  const staff = await createStaffSession(app, {
+    fullName: "Jordan Tradie",
+    email: "jordan@example.com",
+    phoneNumber: "+61422222222",
+    role: "Owner",
+    timezone: "Australia/Sydney",
+  });
+
+  const firstLaunchResponse = await app.request("/staff/setup/launch", {
+    method: "POST",
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(firstLaunchResponse.status, 200);
+  const firstOnboardingCookie = firstLaunchResponse.headers.get("set-cookie");
+  assert.match(firstOnboardingCookie ?? "", /curve_onboarding_session=/);
+  const firstLaunchBody = (await firstLaunchResponse.json()) as {
+    launchUrl: string;
+    setup: { status: string; currentStep?: string };
+  };
+  assert.match(firstLaunchBody.launchUrl, /^https:\/\/curve-ai-onboarding\.pages\.dev\/onboard\//);
+  assert.equal(firstLaunchBody.setup.status, "in_progress");
+  assert.equal(firstLaunchBody.setup.currentStep, "consent");
+
+  const firstInviteCode = new URL(firstLaunchBody.launchUrl).pathname.split("/").pop() ?? "";
+  const resumedResponse = await app.request(`/onboarding/invites/${firstInviteCode}/session`, {
+    headers: {
+      Cookie: firstOnboardingCookie ?? "",
+    },
+  });
+  assert.equal(resumedResponse.status, 200);
+  const resumedBody = (await resumedResponse.json()) as {
+    session: { id: string; staffId: string; inviteCode: string; status: string };
+  };
+  assert.equal(resumedBody.session.staffId, staff.staffId);
+  assert.equal(resumedBody.session.inviteCode, firstInviteCode);
+  assert.equal(resumedBody.session.status, "pending");
+
+  const secondLaunchResponse = await app.request("/staff/setup/launch", {
+    method: "POST",
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(secondLaunchResponse.status, 200);
+  const secondOnboardingCookie = secondLaunchResponse.headers.get("set-cookie");
+  const secondLaunchBody = (await secondLaunchResponse.json()) as {
+    launchUrl: string;
+    setup: { status: string; currentStep?: string };
+  };
+  assert.equal(secondLaunchBody.launchUrl, firstLaunchBody.launchUrl);
+  assert.equal(secondLaunchBody.setup.status, "in_progress");
+  assert.equal(secondLaunchBody.setup.currentStep, "consent");
+
+  const secondInviteCode = new URL(secondLaunchBody.launchUrl).pathname.split("/").pop() ?? "";
+  const resumedAgainResponse = await app.request(`/onboarding/invites/${secondInviteCode}/session`, {
+    headers: {
+      Cookie: secondOnboardingCookie ?? "",
+    },
+  });
+  assert.equal(resumedAgainResponse.status, 200);
+  const resumedAgainBody = (await resumedAgainResponse.json()) as {
+    session: { id: string };
+  };
+  assert.equal(resumedAgainBody.session.id, resumedBody.session.id);
 });
 
 test("staff OTP verification rejects non-numeric codes", async () => {

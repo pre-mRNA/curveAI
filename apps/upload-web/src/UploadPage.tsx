@@ -1,5 +1,6 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { PublicActionCard, PublicFactStrip, PublicMiniSteps, PublicSidePanel } from '../../../packages/shared/src/publicShell';
 import { ApiError, getUploadRequest, uploadPhotos, type UploadRequestSummary } from './api/client';
 import { uploadBrand, uploadBrandStyle } from './brand';
 import { PHOTO_UPLOAD_ACCEPT, isSupportedPhotoFile } from './lib/upload';
@@ -290,190 +291,166 @@ export default function UploadPage() {
             </div>
 
             {uploadRequest ? (
-              <div className="job-brief">
-                <div className="job-brief-header">
-                  <div>
-                    <span className="summary-label">Requested by</span>
-                    <strong>{requester}</strong>
-                  </div>
-                  <span className="pill neutral">{uploadRequest.status === 'completed' ? 'Done' : expiryLabel}</span>
-                </div>
-                <div className="job-brief-main">
-                  <div>
-                    <span className="summary-label">For this job</span>
-                    <strong>{job}</strong>
-                  </div>
-                  <p className="job-brief-note muted">These photos are attached to this job so the team can review them fast.</p>
-                  {uploadRequest.requestNote ? (
-                    <div>
-                      <span className="summary-label">Best photos to send</span>
-                      <p>{uploadRequest.requestNote}</p>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+              <PublicFactStrip
+                className="upload-route-facts"
+                facts={[
+                  { label: 'Requested by', value: requester },
+                  { label: 'For this job', value: job },
+                  {
+                    label: uploadRequest.status === 'completed' ? 'Status' : 'Link status',
+                    value: uploadRequest.status === 'completed' ? 'Done' : expiryLabel,
+                    tone: uploadRequest.status === 'completed' ? 'good' : 'accent',
+                  },
+                ]}
+              />
             ) : null}
 
-            {showReadyState || loadingRequest ? (
-              <div className="upload-panel">
-                {!loadingRequest ? (
-                  <div className="upload-steps">
-                    <div className="upload-step-chip">
-                      <span>1</span>
-                      Pick photos
-                    </div>
-                    <div className="upload-step-chip">
-                      <span>2</span>
-                      Check them
-                    </div>
-                    <div className="upload-step-chip">
-                      <span>3</span>
-                      Send them
-                    </div>
-                  </div>
-                ) : null}
-                <div className="upload-panel-copy">
-                  <strong>Pick the photos you want to send</strong>
-                  <div className="muted">
-                    {loadingRequest ? 'Checking your link.' : 'PNG, JPG, JPEG, HEIC, HEIF, or WebP images only.'}
-                  </div>
-                  {!loadingRequest ? (
-                    <div className="muted">Pick one or more photos, check them below, then tap upload. Only the photos you choose get sent.</div>
-                  ) : null}
-                </div>
-
-                {!loadingRequest ? (
-                  <div className="upload-guide-grid">
-                    <div className="upload-guide-item">
-                      <strong>Start wide</strong>
-                      <p className="muted">Show the whole area first so the team can see where the problem is.</p>
-                    </div>
-                    <div className="upload-guide-item">
-                      <strong>Then close-ups</strong>
-                      <p className="muted">Add the leak, damage, label, blockage, or part that matters.</p>
-                    </div>
-                    <div className="upload-guide-item">
-                      <strong>Send them together</strong>
-                      <p className="muted">You can send a few photos in one go instead of one at a time.</p>
-                    </div>
-                  </div>
-                ) : null}
-
-                <label className="field" htmlFor="upload-files">
-                  <span>Choose photos</span>
-                  <input
-                    ref={fileInputRef}
-                    id="upload-files"
-                    className="text-input upload-file-input"
-                    type="file"
-                    accept={PHOTO_UPLOAD_ACCEPT}
-                    multiple
-                    onChange={onSelect}
-                    disabled={uploadBlocked}
-                  />
-                  {!loadingRequest ? (
-                    <span className="muted">Tap here to open your photo library or choose new photos.</span>
-                  ) : null}
-                </label>
-
-                <div className="meta-row">
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={onUpload}
-                    disabled={uploadBlocked || uploading || !selectedFiles.length}
+            <div className="upload-route-grid">
+              <div className="upload-route-main">
+                {showReadyState || loadingRequest ? (
+                  <PublicActionCard
+                    eyebrow="Send photos"
+                    title="Pick the photos you want to send"
+                    description={loadingRequest ? 'Checking your link.' : 'Pick one or more photos, check them below, then send them together.'}
+                    className="upload-panel"
                   >
-                    {uploading ? 'Uploading...' : uploadButtonLabel}
-                  </button>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={clearSelection}
-                    disabled={loadingRequest || uploading || !selectedFiles.length}
+                    {!loadingRequest ? (
+                      <PublicMiniSteps
+                        steps={[
+                          { id: 'pick', title: 'Pick photos', detail: 'Use your library or take new ones.' },
+                          { id: 'check', title: 'Check them', detail: 'Make sure the problem is easy to see.' },
+                          { id: 'send', title: 'Send them', detail: 'They go straight onto this job.' },
+                        ]}
+                      />
+                    ) : null}
+
+                    <label className="field upload-dropzone" htmlFor="upload-files">
+                      <span>Choose photos</span>
+                      <input
+                        ref={fileInputRef}
+                        id="upload-files"
+                        className="text-input upload-file-input"
+                        type="file"
+                        accept={PHOTO_UPLOAD_ACCEPT}
+                        multiple
+                        onChange={onSelect}
+                        disabled={uploadBlocked}
+                      />
+                      {!loadingRequest ? <span className="muted">Tap here to open your photo library or take new photos.</span> : null}
+                    </label>
+
+                    <div className="meta-row">
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={onUpload}
+                        disabled={uploadBlocked || uploading || !selectedFiles.length}
+                      >
+                        {uploading ? 'Uploading...' : uploadButtonLabel}
+                      </button>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={clearSelection}
+                        disabled={loadingRequest || uploading || !selectedFiles.length}
+                      >
+                        Clear selection
+                      </button>
+                    </div>
+                  </PublicActionCard>
+                ) : null}
+
+                {showCompletedState ? (
+                  <PublicActionCard
+                    eyebrow="Done"
+                    title="Photos sent"
+                    description="The photos have been sent. You can close this page now."
+                    className="upload-panel"
                   >
-                    Clear selection
-                  </button>
-                </div>
-              </div>
-            ) : null}
+                    <ul className="tip-list compact">
+                      <li>{requester} can review these photos now.</li>
+                      <li>If they need more, they can text you another link.</li>
+                    </ul>
+                  </PublicActionCard>
+                ) : null}
 
-            {showCompletedState ? (
-              <div className="upload-panel">
-                <div className="upload-steps upload-steps--done">
-                  <div className="upload-step-chip done">
-                    <span>Done</span>
-                    Sent
-                  </div>
-                </div>
-                <div className="upload-panel-copy">
-                  <strong>All done</strong>
-                  <div className="muted">The photos have been sent. You can close this page now.</div>
-                </div>
-                <ul className="tip-list compact">
-                  <li>{requester} can review these photos now.</li>
-                  <li>If they need more, they can text you another link.</li>
-                </ul>
-              </div>
-            ) : null}
+                {showRecoveryState ? (
+                  <PublicActionCard
+                    eyebrow="Need a new link"
+                    title="This photo link is not working"
+                    description={
+                      pageState === 'expired'
+                        ? 'This link has expired.'
+                        : pageState === 'missing'
+                          ? 'This link is missing.'
+                          : 'We could not open this link.'
+                    }
+                    className="upload-panel"
+                  >
+                    <p className="muted">Ask your tradie or office to text you a new photo link.</p>
+                    <ul className="tip-list compact">
+                      <li>Open the newest text they sent you.</li>
+                      <li>If it still fails, ask them to resend the link.</li>
+                    </ul>
+                  </PublicActionCard>
+                ) : null}
 
-            {showRecoveryState ? (
-              <div className="upload-panel">
-                <div className="upload-panel-copy">
-                  <strong>This photo link is not working.</strong>
-                  <div className="muted">
-                    {pageState === 'expired'
-                      ? 'This link has expired.'
-                      : pageState === 'missing'
-                        ? 'This link is missing.'
-                        : 'We could not open this link.'}
-                  </div>
-                  <div className="muted">Ask your tradie or office to text you a new photo link.</div>
-                </div>
-                <ul className="tip-list compact">
-                  <li>Open the newest text they sent you.</li>
-                  <li>If it still fails, ask them to resend the link.</li>
-                </ul>
-              </div>
-            ) : null}
+                {selectedFiles.length ? (
+                  <div className="selection-summary" aria-live="polite">
+                    <div className="selection-summary-head">
+                      <h2>Ready to send</h2>
+                      <span className="pill">{selectedFiles.length} picked</span>
+                    </div>
 
-            {selectedFiles.length ? (
-              <div className="selection-summary" aria-live="polite">
-                <div className="selection-summary-head">
-                  <h2>Ready to send</h2>
-                  <span className="pill">{selectedFiles.length} picked</span>
-                </div>
-
-                <div className="selection-list">
-                  {selectedFiles.map((file, index) => (
-                    <div className="selection-item" key={`${file.name}-${file.size}-${file.lastModified}`}>
-                      <div className="selection-item-main">
-                        <SelectionPreview file={file} eager={index < 4} />
-                        <div className="selection-copy">
-                          <strong>{file.name}</strong>
-                          <span className="muted">{file.type || 'unknown type'}</span>
+                    <div className="selection-list">
+                      {selectedFiles.map((file, index) => (
+                        <div className="selection-item" key={`${file.name}-${file.size}-${file.lastModified}`}>
+                          <div className="selection-item-main">
+                            <SelectionPreview file={file} eager={index < 4} />
+                            <div className="selection-copy">
+                              <strong>{file.name}</strong>
+                              <span className="muted">{file.type || 'unknown type'}</span>
+                            </div>
+                          </div>
+                          <span className="muted">{formatFileSize(file.size)}</span>
                         </div>
-                      </div>
-                      <span className="muted">{formatFileSize(file.size)}</span>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                ) : null}
+
+                <div className="upload-feedback" aria-live="polite">
+                  {message ? <p className="pill good">{message}</p> : null}
+                  {error && !showRecoveryState ? <p className="pill warn">{error}</p> : null}
                 </div>
               </div>
-            ) : null}
 
-            <div className="upload-feedback" aria-live="polite">
-              {message ? <p className="pill good">{message}</p> : null}
-              {error && !showRecoveryState ? <p className="pill warn">{error}</p> : null}
-            </div>
+              <aside className="upload-route-side">
+                {uploadRequest?.requestNote ? (
+                  <PublicSidePanel eyebrow="Best photos to send" title="Show the right parts">
+                    <p>{uploadRequest.requestNote}</p>
+                  </PublicSidePanel>
+                ) : null}
 
-            <div className="trust-note">
-              <strong>What happens next</strong>
-              <p className="muted">
-                {showRecoveryState
-                  ? 'Once you get a new link, open it and send the photos there.'
-                  : uploadRequest?.status === 'completed'
-                  ? `${requester} can review these photos now.`
-                  : `${requester} gets these photos straight away and they are attached to this job.`}
-              </p>
+                <PublicSidePanel eyebrow="What helps most" title="Keep it simple">
+                  <ul className="tip-list compact">
+                    <li>Start with one wide photo of the whole area.</li>
+                    <li>Then add close-ups of the leak, damage, label, or blocked part.</li>
+                    <li>Use good light if you can.</li>
+                  </ul>
+                </PublicSidePanel>
+
+                <PublicSidePanel eyebrow="What happens next" title="After you send them">
+                  <p className="muted">These photos are attached to this job so the team can review them fast.</p>
+                  <p className="muted">
+                    {showRecoveryState
+                      ? 'Once you get a new link, open it and send the photos there.'
+                      : uploadRequest?.status === 'completed'
+                        ? `${requester} can review these photos now.`
+                        : `${requester} gets these photos straight away and they are attached to this job.`}
+                  </p>
+                </PublicSidePanel>
+              </aside>
             </div>
           </div>
         </div>

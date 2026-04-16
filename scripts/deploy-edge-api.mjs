@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const repoRoot = process.cwd();
+const scriptPath = fileURLToPath(import.meta.url);
+const scriptDir = path.dirname(scriptPath);
+const repoRoot = path.resolve(scriptDir, "..");
 const appDir = path.join(repoRoot, "apps", "edge-api");
 const sourceConfigPath = path.join(appDir, "wrangler.jsonc");
 const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID?.trim();
@@ -22,6 +25,8 @@ const renderedConfigPath = path.join(tempDir, "wrangler.rendered.jsonc");
 
 try {
   let config = readFileSync(sourceConfigPath, "utf8");
+  const absoluteMainPath = path.join(appDir, "src", "index.ts").replaceAll("\\", "\\\\");
+  config = config.replace('"main": "src/index.ts"', `"main": "${absoluteMainPath}"`);
   config = config.replace("replace-in-cloudflare-dashboard", databaseId);
   if (workerName) {
     config = config.replace('"name": "curve-ai-api-staging"', `"name": "${workerName}"`);
