@@ -31,7 +31,10 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 5. Run Worker API tests with `npm run test:edge-api`.
 6. Run web tests with `npm run test:web`, `npm run test:ops-web`, `npm run test:staff-web`, and `npm run test:upload-web`.
 7. Run the shared Pages review-gate tests with `npm run test:pages-gate`.
-8. For Cloudflare staging deploys, set `CLOUDFLARE_D1_DATABASE`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, and `VITE_API_BASE_URL`. Prefer Cloudflare Access for the Pages apps plus the Worker API. The per-Pages `REVIEW_PASSCODE` + `REVIEW_COOKIE_SECRET` gate is only a fallback for the Pages hosts themselves. Then run `npm run deploy:cloudflare:staging` after `wrangler login`.
+8. For Cloudflare staging deploys, set `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_WORKERS_SUBDOMAIN`, `CLOUDFLARE_D1_DATABASE`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, and `VITE_API_BASE_URL`. Prefer Cloudflare Access for the Pages apps plus the Worker API. The per-Pages `REVIEW_PASSCODE` + `REVIEW_COOKIE_SECRET` gate is only a fallback for the Pages hosts themselves.
+9. Use `npm run bootstrap:cloudflare:staging` to provision the D1 database, R2 bucket, workers.dev subdomain, and Pages projects idempotently. Pass `--write-wrangler` if you want the script to update the checked-in Worker staging config with the discovered D1 ID and worker URL.
+10. Use `npm run secrets:cloudflare:staging` to push Worker and Pages review-gate secrets from your shell env to Cloudflare.
+11. Use `npm run deploy:cloudflare:staging` to deploy the Worker and all four Pages apps, then `npm run smoke:cloudflare:staging` to verify the live Worker health and Pages review gates.
 
 ## Auth Model
 
@@ -62,6 +65,7 @@ The current deployment target is Cloudflare Pages for the split browser apps plu
 - `npm run test:ops-web`
 - `npm run test:staff-web`
 - `npm run test:upload-web`
+- `npm run smoke:cloudflare:staging`
 
 ## Security
 

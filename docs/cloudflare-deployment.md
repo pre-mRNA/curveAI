@@ -66,6 +66,9 @@ Browser auth for onboarding and staff now relies on Worker-issued `HttpOnly` ses
 
 Use these env vars for migration and deploy scripts:
 
+- `CLOUDFLARE_API_TOKEN` - account-scoped token with D1, R2, Workers, and Pages edit permissions
+- `CLOUDFLARE_ACCOUNT_ID` - target Cloudflare account id
+- `CLOUDFLARE_WORKERS_SUBDOMAIN` - preferred workers.dev subdomain when the account has not been initialized yet
 - `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
 - `CLOUDFLARE_D1_DATABASE_ID` - actual D1 database id used by the env-driven Worker deploy script
 - `CLOUDFLARE_R2_BUCKET_NAME` - optional override for the Worker artifact bucket name during deploy rendering
@@ -110,6 +113,10 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - For local Pages builds, set `VITE_API_BASE_URL=http://127.0.0.1:8787`.
 - For local D1 migrations, `CLOUDFLARE_D1_DATABASE` defaults to `curve-ai-staging`, but it can be overridden before running the migration or deploy scripts.
 - For Worker deploys, the checked-in `apps/edge-api/wrangler.jsonc` stays template-like and `npm run deploy:edge-api` renders a temporary config from `CLOUDFLARE_D1_DATABASE_ID` before calling `wrangler deploy`.
+- `npm run bootstrap:cloudflare:staging` now provisions the workers.dev subdomain, D1 database, R2 bucket, and Pages projects idempotently from the Cloudflare API and `wrangler`.
+- Pass `--write-wrangler` to `npm run bootstrap:cloudflare:staging -- --write-wrangler` if you want it to update the checked-in staging Worker config with the discovered D1 id and live worker URL.
+- `npm run secrets:cloudflare:staging` pushes Worker secrets plus the fallback Pages review-gate secrets from your shell env into Cloudflare.
+- `npm run smoke:cloudflare:staging` checks the live Worker `/health` endpoint plus the Pages review gates and optional passcode unlock flow.
 - `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
 - That example includes the Worker deploy-time secrets (`ADMIN_TOKEN`, `AUTOMATION_SHARED_SECRET`) but the Pages review-gate secrets still have to be provisioned on each Pages project runtime.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
