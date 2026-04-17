@@ -207,6 +207,12 @@ export default function OnboardingPage() {
 
   const transcript = session?.transcript ?? [];
   const readyToFinalize = Boolean(session?.calendarConnected && session?.voiceSampleUploaded);
+  const calendarStatus = session?.calendarStatus ?? (session?.calendarConnected ? 'connected' : 'pending');
+  const calendarUnavailable = calendarStatus === 'error';
+  const calendarStatusLabel =
+    calendarStatus === 'connected' ? 'Connected' : calendarUnavailable ? 'Unavailable here' : 'Not connected';
+  const calendarStatusTone = calendarStatus === 'connected' ? 'good' : calendarUnavailable ? 'warn' : 'warn';
+  const resolvedCalendarMessage = calendarMessage ?? session?.calendarError ?? null;
   const recordingSupported =
     typeof window !== 'undefined' &&
     typeof navigator !== 'undefined' &&
@@ -510,6 +516,13 @@ export default function OnboardingPage() {
         setCalendarConnectState('connected');
         setCalendarMessage(response.accountEmail ? `Calendar connected for ${response.accountEmail}.` : 'Calendar connected.');
         setCurrentStep('voice_sample');
+        return;
+      }
+
+      if (response.status === 'error') {
+        setCalendarConnectState('idle');
+        setCalendarLink('');
+        setCalendarMessage(response.message ?? 'Microsoft calendar is not ready in this environment yet.');
         return;
       }
 
@@ -1035,29 +1048,47 @@ export default function OnboardingPage() {
               <PublicActionCard
                 eyebrow="Calendar"
                 title="Connect your calendar."
-                description="Tap the button below. Microsoft opens in a new tab. When you finish there, come back here and check again."
+                description={
+                  calendarUnavailable
+                    ? 'This environment does not have live Microsoft calendar turned on yet.'
+                    : 'Tap the button below. Microsoft opens in a new tab. When you finish there, come back here and check again.'
+                }
                 className="onboarding-stage-card"
               >
                   <div className="support-card">
                     <strong>Quick steps</strong>
                     <ul className="guide-list compact">
-                      <li>Tap <strong>Connect Microsoft</strong>.</li>
-                      <li>Finish the sign-in in the new tab.</li>
-                      <li>Come back here and tap <strong>I’m back, check again</strong>.</li>
+                      {calendarUnavailable ? (
+                        <>
+                          <li>This demo build is still waiting on real Microsoft credentials.</li>
+                          <li>Keep going only after Microsoft is enabled for this environment.</li>
+                          <li>Nothing gets booked until a real calendar connection succeeds.</li>
+                        </>
+                      ) : (
+                        <>
+                          <li>Tap <strong>Connect Microsoft</strong>.</li>
+                          <li>Finish the sign-in in the new tab.</li>
+                          <li>Come back here and tap <strong>I’m back, check again</strong>.</li>
+                        </>
+                      )}
                     </ul>
                   </div>
 
                   <div className="calendar-card">
                     <div className="meta-row">
                       <span className="pill accent">Microsoft</span>
-                      <span className={`pill ${session?.calendarConnected ? 'good' : 'warn'}`}>
-                        {session?.calendarConnected ? 'Connected' : 'Not connected'}
+                      <span className={`pill ${calendarStatusTone}`}>
+                        {calendarStatusLabel}
                       </span>
                     </div>
 
                     <div className="inline-actions">
                       <button className="button" type="button" onClick={() => void connectCalendar()} disabled={calendarConnectState === 'loading'}>
-                        {calendarConnectState === 'loading' ? 'Opening Microsoft...' : 'Connect Microsoft'}
+                        {calendarConnectState === 'loading'
+                          ? 'Opening Microsoft...'
+                          : calendarUnavailable
+                            ? 'Try Microsoft again'
+                            : 'Connect Microsoft'}
                       </button>
                       <button className="button secondary" type="button" onClick={() => void refreshCalendarStatus()}>
                         I’m back, check again
@@ -1070,7 +1101,7 @@ export default function OnboardingPage() {
                       </a>
                     ) : null}
 
-                    {calendarMessage ? <p className="pill accent">{calendarMessage}</p> : null}
+                    {resolvedCalendarMessage ? <p className={`pill ${calendarUnavailable ? 'warn' : 'accent'}`}>{resolvedCalendarMessage}</p> : null}
 
                     {session?.calendarConnected ? (
                       <div className="inline-actions">

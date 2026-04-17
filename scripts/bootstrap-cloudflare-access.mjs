@@ -6,10 +6,17 @@ const names = defaultCloudflareNames();
 const sessionDuration = getOptionalEnv("CLOUDFLARE_ACCESS_SESSION_DURATION", "24h");
 const allowedEmails = splitCsv("CLOUDFLARE_ACCESS_ALLOWED_EMAILS");
 const allowedDomains = splitCsv("CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS");
+const allowDomainPolicies = getOptionalEnv("CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES", "false") === "true";
 
 if (!allowedEmails.length && !allowedDomains.length) {
   throw new Error(
-    "Set CLOUDFLARE_ACCESS_ALLOWED_EMAILS and/or CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS before bootstrapping Cloudflare Access.",
+    "Set CLOUDFLARE_ACCESS_ALLOWED_EMAILS before bootstrapping Cloudflare Access.",
+  );
+}
+
+if (allowedDomains.length && !allowDomainPolicies) {
+  throw new Error(
+    "Cloudflare Access domain allowlists are disabled by default. Set CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES=true only if you intentionally want broader review access.",
   );
 }
 
@@ -82,9 +89,11 @@ for (const target of targets) {
           ...allowedEmails.map((email) => ({
             email: { email },
           })),
-          ...allowedDomains.map((domainName) => ({
-            email_domain: { domain: domainName },
-          })),
+          ...(allowDomainPolicies
+            ? allowedDomains.map((domainName) => ({
+                email_domain: { domain: domainName },
+              }))
+            : []),
         ],
         exclude: [],
         require: [],
@@ -119,6 +128,7 @@ console.log(
       sessionDuration,
       allowedEmails,
       allowedDomains,
+      allowDomainPolicies,
       targets: results,
     },
     null,

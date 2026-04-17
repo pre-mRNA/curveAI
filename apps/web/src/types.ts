@@ -33,6 +33,9 @@ export interface OnboardingSession {
   staffName: string;
   companyName: string;
   calendarConnected: boolean;
+  calendarStatus?: 'pending' | 'connected' | 'error';
+  calendarMode?: 'mock' | 'configured';
+  calendarError?: string;
   voiceSampleUploaded: boolean;
   updatedAt: string;
 }
@@ -98,6 +101,9 @@ export interface CalendarConnectResponse {
   connected?: boolean;
   provider?: 'microsoft';
   accountEmail?: string;
+  status?: 'pending' | 'connected' | 'error';
+  mode?: 'mock' | 'configured';
+  message?: string;
   session?: OnboardingSession;
 }
 

@@ -18,6 +18,7 @@ if (!workerUrl) {
 
 const reviewPasscode = getOptionalEnv("REVIEW_PASSCODE");
 const automationSharedSecret = getOptionalEnv("AUTOMATION_SHARED_SECRET");
+const adminToken = getOptionalEnv("ADMIN_TOKEN");
 const pagesUrls = Object.values(names.pagesProjects).map((project) => `https://${project}.pages.dev`);
 
 await checkWorkerHealth(workerUrl);
@@ -25,6 +26,7 @@ for (const url of pagesUrls) {
   await checkPagesGate(url, reviewPasscode);
 }
 await checkVoicePhotoLink(workerUrl, names.pagesProjects.upload, automationSharedSecret, reviewPasscode);
+await checkOnboardingInviteRoute(workerUrl, names.pagesProjects.onboarding, adminToken, reviewPasscode);
 
 console.log("Cloudflare staging smoke checks passed.");
 
@@ -51,24 +53,7 @@ async function checkPagesGate(baseUrl, passcode) {
     return;
   }
 
-  const unlockBody = new URLSearchParams({
-    passcode,
-    redirect: "/",
-  });
-  const unlockResponse = await fetch(`${baseUrl}/__review-access`, {
-    method: "POST",
-    body: unlockBody,
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    redirect: "manual",
-  });
-  const setCookie = unlockResponse.headers.get("set-cookie");
-  if (unlockResponse.status !== 303 || !setCookie) {
-    throw new Error(`Expected successful review unlock for ${baseUrl}`);
-  }
-
-  const cookie = setCookie.split(";", 1)[0];
+  const cookie = await unlockPagesHost(baseUrl, "/", passcode);
   const unlockedResponse = await fetch(baseUrl, {
     headers: {
       Cookie: cookie,
@@ -121,24 +106,7 @@ async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewP
   }
 
   const uploadUrl = new URL(uploadLink);
-  const unlockBody = new URLSearchParams({
-    passcode: reviewPasscode,
-    redirect: uploadUrl.pathname,
-  });
-  const unlockResponse = await fetch(`${uploadUrl.origin}/__review-access`, {
-    method: "POST",
-    body: unlockBody,
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    redirect: "manual",
-  });
-  const setCookie = unlockResponse.headers.get("set-cookie");
-  if (unlockResponse.status !== 303 || !setCookie) {
-    throw new Error(`Expected successful review unlock for ${uploadLink}`);
-  }
-
-  const cookie = setCookie.split(";", 1)[0];
+  const cookie = await unlockPagesHost(uploadUrl.origin, uploadUrl.pathname, reviewPasscode);
   const uploadResponse = await fetch(uploadLink, {
     headers: {
       Cookie: cookie,
@@ -148,4 +116,74 @@ async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewP
   if (!uploadResponse.ok || /passcode/i.test(uploadBody) || !/upload|photo|job/i.test(uploadBody)) {
     throw new Error(`Unlocked upload route did not render app HTML for ${uploadLink}`);
   }
+}
+
+async function checkOnboardingInviteRoute(workerUrl, onboardingProjectName, adminToken, reviewPasscode) {
+  if (!adminToken) {
+    console.log("Skipping onboarding invite smoke check because ADMIN_TOKEN is not set.");
+    return;
+  }
+
+  const response = await fetch(`${workerUrl.replace(/\/$/, "")}/onboarding/invites`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      fullName: "Curve AI Demo Tradie",
+      phoneNumber: "+61411111112",
+      role: "Owner",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Onboarding invite smoke check returned ${response.status}: ${await response.text()}`);
+  }
+
+  const payload = await response.json();
+  const inviteCode = payload?.invite?.code;
+  if (typeof inviteCode !== "string" || inviteCode.length < 12) {
+    throw new Error("Onboarding invite smoke check did not return a valid invite code.");
+  }
+
+  if (!reviewPasscode) {
+    return;
+  }
+
+  const onboardingOrigin = `https://${onboardingProjectName}.pages.dev`;
+  const routePath = `/onboard/${inviteCode}`;
+  const cookie = await unlockPagesHost(onboardingOrigin, routePath, reviewPasscode);
+  const pageResponse = await fetch(`${onboardingOrigin}${routePath}`, {
+    headers: {
+      Cookie: cookie,
+    },
+  });
+  const pageBody = await pageResponse.text();
+  if (
+    !pageResponse.ok ||
+    /passcode/i.test(pageBody) ||
+    !/Curve AI Setup|<div id="root"><\/div>|\/assets\//i.test(pageBody)
+  ) {
+    throw new Error(`Unlocked onboarding route did not render the setup flow for ${routePath}`);
+  }
+}
+
+async function unlockPagesHost(baseUrl, redirectPath, passcode) {
+  const unlockBody = new URLSearchParams({
+    passcode,
+    redirect: redirectPath,
+  });
+  const unlockResponse = await fetch(`${baseUrl}/__review-access`, {
+    method: "POST",
+    body: unlockBody,
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    redirect: "manual",
+  });
+  const setCookie = unlockResponse.headers.get("set-cookie");
+  if (unlockResponse.status !== 303 || !setCookie) {
+    throw new Error(`Expected successful review unlock for ${baseUrl}${redirectPath}`);
+  }
+  return setCookie.split(";", 1)[0];
 }

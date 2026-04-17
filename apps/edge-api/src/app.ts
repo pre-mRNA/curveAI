@@ -1161,6 +1161,11 @@ export function createApp(options?: {
     await next();
   };
 
+  const liveMicrosoftUnavailableMessage = "Microsoft calendar is not configured for this staging environment yet.";
+  function microsoftCalendarRequiresLiveCredentials(requestUrl: string): boolean {
+    return config.calendarMode !== "configured" && !isLocalRequest(requestUrl);
+  }
+
   app.use("/dashboard", requireBrowserOrigin(opsOrigins));
   app.use("/ai-test-studio/*", requireBrowserOrigin(opsOrigins));
   app.use("/staff/*", requireBrowserOrigin(staffOrigins));
@@ -1979,6 +1984,26 @@ export function createApp(options?: {
     if (!staff) {
       return jsonError(c, 404, "Staff not found");
     }
+    if (microsoftCalendarRequiresLiveCredentials(c.req.url)) {
+      const now = new Date().toISOString();
+      await repo.saveStaffCalendarConnection({
+        staffId,
+        provider: "outlook",
+        status: "error",
+        accountEmail: staff.calendarConnection?.accountEmail,
+        calendarId: staff.calendarConnection?.calendarId,
+        calendarLabel: staff.calendarConnection?.calendarLabel,
+        timezone: staff.calendarConnection?.timezone ?? staff.timezone,
+        authState: undefined,
+        accessToken: undefined,
+        refreshToken: undefined,
+        tokenExpiresAt: undefined,
+        lastError: liveMicrosoftUnavailableMessage,
+        connectedAt: staff.calendarConnection?.connectedAt,
+        updatedAt: now,
+      });
+      return jsonError(c, 503, liveMicrosoftUnavailableMessage);
+    }
     const started = await providers.calendar.startAuth({
       staffName: staff.fullName,
       publicApiUrl: config.publicApiUrl,
@@ -2356,6 +2381,14 @@ export function createApp(options?: {
     const result = await requireOnboardingSession(c);
     if ("error" in result) {
       return result.error;
+    }
+    if (microsoftCalendarRequiresLiveCredentials(c.req.url)) {
+      const session = await onboardingService.markCalendarUnavailable(result.session, liveMicrosoftUnavailableMessage);
+      return c.json({
+        ok: true,
+        calendar: session.calendar,
+        session,
+      });
     }
     const session = await onboardingService.startCalendar(result.session);
     return c.json({

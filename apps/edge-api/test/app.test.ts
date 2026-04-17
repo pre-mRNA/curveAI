@@ -921,6 +921,56 @@ test("mock provider routes are not exposed on non-local requests", async () => {
   assert.equal(response.status, 404);
 });
 
+test("non-local onboarding calendar start reports an honest unavailable state when Microsoft is not configured", async () => {
+  const app = createTestApp();
+
+  const inviteResponse = await app.request("/onboarding/invites", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      fullName: "Casey Tradie",
+      role: "Owner",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as { invite: { code: string } };
+
+  const startResponse = await app.request("/onboarding/sessions/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    }),
+  });
+  assert.equal(startResponse.status, 201);
+  const onboardingCookie = startResponse.headers.get("set-cookie") ?? "";
+  const startBody = (await startResponse.json()) as { session: { id: string } };
+
+  const calendarResponse = await app.request(
+    `https://curve-ai-api-staging.workers.dev/onboarding/sessions/${startBody.session.id}/calendar/microsoft/start`,
+    {
+      headers: {
+        Cookie: onboardingCookie,
+        Origin: "https://curve-ai-onboarding.pages.dev",
+      },
+    },
+  );
+  assert.equal(calendarResponse.status, 200);
+  const calendarBody = (await calendarResponse.json()) as {
+    calendar?: { status?: string; authUrl?: string; lastError?: string };
+    session: { status: string; calendar?: { status?: string; lastError?: string } };
+  };
+  assert.equal(calendarBody.calendar?.status, "error");
+  assert.equal(calendarBody.calendar?.authUrl, undefined);
+  assert.match(calendarBody.calendar?.lastError ?? "", /not configured for this staging environment/i);
+  assert.equal(calendarBody.session.status, "calendar");
+  assert.equal(calendarBody.session.calendar?.status, "error");
+});
+
 test("worker blocks realtime session issuance without both consents", async () => {
   const repo = new InMemoryOnboardingRepository();
   const app = createApp({

@@ -133,7 +133,7 @@ function AuthScreen({
                   </div>
                   <div className="feature-item">
                     <strong>Setup</strong>
-                    <span className="muted">Save voice, calendar, and pricing basics.</span>
+                    <span className="muted">Start or resume the private setup flow.</span>
                   </div>
                   <div className="feature-item">
                     <strong>Tests</strong>

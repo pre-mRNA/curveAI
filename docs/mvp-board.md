@@ -5,7 +5,6 @@
 - Provider adapters: replace mock ElevenLabs browser, Microsoft calendar, and Twilio behavior with live clients behind the existing onboarding and voice routes.
 - Portable orchestration: keep the onboarding control plane provider-neutral so reasoning and voice components can move to Australian self-hosted infrastructure later.
 - Security hardening: deepen upload verification, retention controls, and privacy-safe logging on the Worker path.
-- Staff/onboarding convergence: decide whether the staff Pages app should stay on the temporary `/staff/*` setup layer or hand off into the canonical onboarding-session flow.
 - AI test studio depth: move from single-case runs into saved suites, async execution, richer rubrics, and Worker-native target harnesses.
 
 ## Next
@@ -22,7 +21,7 @@
 - Realtime voice maturity: onboarding voice still depends on a mock browser-session provider path when live ElevenLabs config is incomplete.
 - Voice tool depth: quote, callback, appointment, photo-link, and post-call routes exist, but they are still thin MVP workflows rather than fully integrated operational flows.
 - Onboarding review UX: the review editor is still a flat set of generic text inputs instead of a stronger structured business-profile workflow.
-- Staff/onboarding convergence: the separate `/staff/*` setup layer is still temporary and can drift away from the canonical onboarding-session flow if it is left in place.
+- Investor demo runbook: the private demo still needs Cloudflare Access reviewer allowlists and live Microsoft credentials before the full investor path is truly ready.
 
 ## Done
 
@@ -41,6 +40,7 @@
 - Added D1 CRM tables and Worker coverage for Cloudflare-native photo upload and post-call persistence.
 - Added Worker-side staff invite/session routes and staff-scoped job access for the browser-first staff surface.
 - Added `apps/staff-web` as the phone-first staff surface for queue/setup testing.
+- Converged staff setup into the canonical onboarding-session flow so the staff app now acts as a setup launcher/status shell rather than a second independent setup form system.
 - Added a Worker-backed AI test studio with persistent cases/runs, mock-or-HTTP runner/judge providers, and an ops console route that uses the real Worker endpoints.
 - Closed the biggest mobile UX gaps in ops/staff by reviewing rendered screenshots and adjusting the phone ordering/layout instead of relying on desktop-only code review.
 - Pruned the stale Express API and deferred iOS pilot from the active repo path so the maintained runtime is Pages + Worker only.

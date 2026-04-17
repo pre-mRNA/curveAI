@@ -67,8 +67,9 @@ Browser auth for onboarding and staff now relies on Worker-issued `HttpOnly` ses
 Use these env vars for migration and deploy scripts:
 
 - `CLOUDFLARE_API_TOKEN` - account-scoped token with D1, R2, Workers, and Pages edit permissions
-- `CLOUDFLARE_ACCESS_ALLOWED_EMAILS` - optional comma-separated email allowlist for Cloudflare Access bootstrap
-- `CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS` - optional comma-separated email-domain allowlist for Cloudflare Access bootstrap
+- `CLOUDFLARE_ACCESS_ALLOWED_EMAILS` - comma-separated email allowlist for Cloudflare Access bootstrap
+- `CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS` - optional email-domain allowlist, only when you intentionally opt in to broader policies
+- `CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES` - optional `true` to allow domain-wide policies; keep this `false` for investor review
 - `CLOUDFLARE_ACCESS_SESSION_DURATION` - optional Access session duration, defaults to `24h`
 - `CLOUDFLARE_ACCOUNT_ID` - target Cloudflare account id
 - `CLOUDFLARE_WORKERS_SUBDOMAIN` - preferred workers.dev subdomain when the account has not been initialized yet
@@ -101,7 +102,8 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - If Access is not configured yet, set `REVIEW_PASSCODE` and `REVIEW_COOKIE_SECRET` on each Pages project to enable the fallback review gate.
 - That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
 - The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
-- The Access bootstrap flow also fails closed: it refuses to create review apps unless at least one explicit email or email-domain allowlist env var is set.
+- The Access bootstrap flow now fails closed by default: it requires explicit reviewer emails.
+- Domain-wide allowlists are blocked unless `CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES=true` is set intentionally.
 - The four Pages apps now import one shared review-gate implementation from the repo root, and `npm run test:pages-gate` exercises the fail-closed, asset-blocking, cookie-issuance, and logout paths centrally.
 - Worker route families are now origin-fenced by app surface:
   - `/dashboard` and `/ai-test-studio/*` only accept the ops origin
@@ -121,7 +123,8 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - `npm run bootstrap:cloudflare:access` provisions or updates one self-hosted Cloudflare Access app per staging host when the API token also has `Access: Apps and Policies Write`.
 - Pass `--write-wrangler` to `npm run bootstrap:cloudflare:staging -- --write-wrangler` if you want it to update the checked-in staging Worker config with the discovered D1 id and live worker URL.
 - `npm run secrets:cloudflare:staging` pushes Worker secrets plus the fallback Pages review-gate secrets from your shell env into Cloudflare.
-- `npm run smoke:cloudflare:staging` checks the live Worker `/health` endpoint plus the Pages review gates and optional passcode unlock flow.
+- `npm run smoke:cloudflare:staging` checks the live Worker `/health` endpoint, the Pages review gates, a signed photo-link path, and the onboarding invite route when the required secrets are present.
+- `npm run seed:investor:demo` creates a repeatable onboarding invite, staff invite, and optional upload-link scenario for private investor review.
 - `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
 - That example includes the Worker deploy-time secrets (`ADMIN_TOKEN`, `AUTOMATION_SHARED_SECRET`) but the Pages review-gate secrets still have to be provisioned on each Pages project runtime.
 - Mirror the Cloudflare env names locally so production and dev use the same vocabulary.
@@ -144,5 +147,6 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - The staff browser app is the active field surface and should be treated as a first-class Pages deployment in CORS and environment setup.
 - The AI test studio now depends on the same Worker origin and admin token flow as the ops dashboard, so it should be treated as part of the protected internal Pages surface rather than a separate local-only tool.
 - `/health` now reports `blockingIssues` for platform-level readiness gaps and `advisoryIssues` for partial optional-provider setup. Non-local requests fail fast only on blocking issues, while partial ElevenLabs/OpenAI/Microsoft configuration stays visible to admin and local callers without taking the whole Worker offline.
+- Non-local Microsoft calendar auth should not use mock-success behavior in investor review. If live Microsoft credentials are missing, the onboarding flow now surfaces an honest unavailable state instead of redirecting into mock auth.
 - `/voice/tools/appointment` now uses the calendar adapter for provider-backed event creation when a connected staff calendar exposes an external provider token, and `/voice/tools/send-photo-link` now uses the messaging adapter for provider-backed SMS delivery while still creating the local upload request.
 - Keep core business logic portable so the worker runtime can be swapped or self-hosted later if needed.

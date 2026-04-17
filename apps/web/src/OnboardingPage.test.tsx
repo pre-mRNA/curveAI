@@ -315,6 +315,82 @@ describe('onboarding route', () => {
     });
   }, 10000);
 
+  it('shows an honest unavailable state when Microsoft calendar is not configured for this environment', async () => {
+    startSessionFixture = backendSession({
+      status: 'calendar',
+      calendar: {
+        provider: 'microsoft',
+        mode: 'mock',
+        status: 'error',
+        lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+      },
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
+      const method = init?.method ?? 'GET';
+
+      if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
+        return jsonResponse({ error: { message: 'No resumable session' } }, 401);
+      }
+
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
+        return jsonResponse({
+          session: startSessionFixture,
+        });
+      }
+
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/calendar/microsoft/start') && method === 'GET') {
+        return jsonResponse({
+          calendar: {
+            provider: 'microsoft',
+            mode: 'mock',
+            status: 'error',
+            lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+          },
+          session: backendSession({
+            status: 'calendar',
+            calendar: {
+              provider: 'microsoft',
+              mode: 'mock',
+              status: 'error',
+              lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+            },
+          }),
+        });
+      }
+
+      return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
+    });
+
+    const user = userEvent.setup();
+    renderRoute('/onboard/invite-123');
+
+    expect(await screen.findByRole('heading', { name: /set up your assistant/i })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/yes, you can record this setup so we do not miss anything/i));
+    await user.click(screen.getByLabelText(/yes, you can use my voice sample so the assistant sounds like me/i));
+    await user.click(screen.getByLabelText(/yes, you can use my answers to set up my jobs, prices, and rules/i));
+    await user.click(screen.getByRole('button', { name: /start setup/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /connect your calendar/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/this environment does not have live microsoft calendar turned on yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/microsoft calendar is not configured for this staging environment yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/unavailable here/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /try microsoft again/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/calendar\/microsoft\/start$/),
+        expect.objectContaining({ credentials: 'include' }),
+      );
+    });
+  });
+
   it('requests the first interview question when the started session does not include one', async () => {
     startSessionFixture = backendSession({
       nextQuestion: undefined,

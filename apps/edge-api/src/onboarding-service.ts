@@ -352,6 +352,26 @@ export class OnboardingService {
     return this.getSessionSummary(session);
   }
 
+  async markCalendarUnavailable(session: OnboardingSessionRecord, message: string) {
+    this.ensureMutable(session, "mark calendar authorization unavailable");
+    session.calendar = {
+      provider: "microsoft",
+      mode: this.options.providers.calendar.mode,
+      status: "error",
+      authUrl: undefined,
+      authState: undefined,
+      accountEmail: session.calendar?.accountEmail,
+      calendarLabel: session.calendar?.calendarLabel,
+      connectedAt: session.calendar?.connectedAt,
+      lastError: message,
+    };
+    session.status = "calendar";
+    session.updatedAt = new Date().toISOString();
+    await this.options.repo.saveSession(session);
+    await this.touchCoordinator(session.id, "calendar-unavailable", session.status);
+    return this.getSessionSummary(session);
+  }
+
   async completeCalendar(
     state: string,
     input: { code?: string; accountEmail?: string; calendarLabel?: string; redirectUri?: string },

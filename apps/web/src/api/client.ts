@@ -141,6 +141,9 @@ function mapSession(session: BackendSessionSummary): OnboardingSession {
     staffName: session.staffName,
     companyName: session.review.staffProfile.companyName,
     calendarConnected: session.calendar?.status === 'connected',
+    calendarStatus: session.calendar?.status,
+    calendarMode: session.calendar?.mode,
+    calendarError: session.calendar?.lastError,
     voiceSampleUploaded: Boolean(session.voiceSample),
     updatedAt: session.updatedAt ?? new Date().toISOString(),
   };
@@ -309,6 +312,9 @@ export const apiClient = {
     return {
       authorizationUrl: response.calendar?.authUrl,
       connected: response.calendar?.status === 'connected',
+      status: response.calendar?.status,
+      mode: response.calendar?.mode,
+      message: response.calendar?.lastError,
       provider: 'microsoft',
       accountEmail: response.calendar?.accountEmail,
       session: response.session ? mapSession(response.session) : undefined,

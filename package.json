@@ -23,6 +23,7 @@
     "bootstrap:cloudflare:access": "node scripts/bootstrap-cloudflare-access.mjs",
     "secrets:cloudflare:staging": "node scripts/set-cloudflare-staging-secrets.mjs",
     "smoke:cloudflare:staging": "node scripts/smoke-cloudflare-staging.mjs",
+    "seed:investor:demo": "node scripts/seed-investor-demo.mjs",
     "deploy:cloudflare:staging": "npm run deploy:edge-api && npm run deploy:pages:all",
     "test:pages-gate": "node --test shared/review-gate.test.mjs",
     "test:edge-api": "npm run test -w @curve-ai/edge-api",
