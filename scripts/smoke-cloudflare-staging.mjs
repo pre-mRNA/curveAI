@@ -19,19 +19,38 @@ if (!workerUrl) {
 const reviewPasscode = getOptionalEnv("REVIEW_PASSCODE");
 const automationSharedSecret = getOptionalEnv("AUTOMATION_SHARED_SECRET");
 const adminToken = getOptionalEnv("ADMIN_TOKEN");
+const accessServiceTokenId = getOptionalEnv("CLOUDFLARE_ACCESS_SERVICE_TOKEN_ID");
+const accessServiceTokenSecret = getOptionalEnv("CLOUDFLARE_ACCESS_SERVICE_TOKEN_SECRET");
 const pagesUrls = Object.values(names.pagesProjects).map((project) => `https://${project}.pages.dev`);
+const accessHeaders =
+  accessServiceTokenId && accessServiceTokenSecret
+    ? {
+        "CF-Access-Client-Id": accessServiceTokenId,
+        "CF-Access-Client-Secret": accessServiceTokenSecret,
+      }
+    : null;
 
-await checkWorkerHealth(workerUrl);
+const workerProtection = await checkWorkerHealth(workerUrl);
 for (const url of pagesUrls) {
-  await checkPagesGate(url, reviewPasscode);
+  await checkPagesGate(url, reviewPasscode, accessHeaders);
 }
-await checkVoicePhotoLink(workerUrl, names.pagesProjects.upload, automationSharedSecret, reviewPasscode);
-await checkOnboardingInviteRoute(workerUrl, names.pagesProjects.onboarding, adminToken, reviewPasscode);
+if (workerProtection === "access" && !accessHeaders) {
+  console.log("Skipping signed Worker route smoke checks because Cloudflare Access is enabled and no service token is configured.");
+} else {
+  await checkVoicePhotoLink(workerUrl, names.pagesProjects.upload, automationSharedSecret, reviewPasscode, accessHeaders);
+  await checkOnboardingInviteRoute(workerUrl, names.pagesProjects.onboarding, adminToken, reviewPasscode, accessHeaders);
+}
 
 console.log("Cloudflare staging smoke checks passed.");
 
 async function checkWorkerHealth(baseUrl) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/health`);
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/health`, {
+    headers: accessHeaders ?? undefined,
+    redirect: "manual",
+  });
+  if (isAccessRedirect(response)) {
+    return "access";
+  }
   if (!response.ok) {
     throw new Error(`Worker health returned ${response.status}`);
   }
@@ -39,12 +58,17 @@ async function checkWorkerHealth(baseUrl) {
   if (!body?.ok || body?.runtime !== "cloudflare-worker") {
     throw new Error("Worker health response did not match expected runtime.");
   }
+  return "open";
 }
 
-async function checkPagesGate(baseUrl, passcode) {
+async function checkPagesGate(baseUrl, passcode, accessHeaders) {
   const gateResponse = await fetch(baseUrl, {
+    headers: accessHeaders ?? undefined,
     redirect: "manual",
   });
+  if (isAccessRedirect(gateResponse)) {
+    return;
+  }
   const gateBody = await gateResponse.text();
   if (gateResponse.status !== 401 || !/passcode/i.test(gateBody)) {
     throw new Error(`Expected review gate on ${baseUrl}, received ${gateResponse.status}`);
@@ -65,7 +89,7 @@ async function checkPagesGate(baseUrl, passcode) {
   }
 }
 
-async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewPasscode) {
+async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewPasscode, accessHeaders) {
   if (!secret) {
     console.log("Skipping voice photo-link smoke check because AUTOMATION_SHARED_SECRET is not set.");
     return;
@@ -84,6 +108,7 @@ async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewP
   const response = await fetch(`${workerUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
     headers: {
+      ...(accessHeaders ?? {}),
       "content-type": "application/json",
       "x-curve-timestamp": timestamp,
       "x-curve-signature": `sha256=${signature}`,
@@ -118,7 +143,7 @@ async function checkVoicePhotoLink(workerUrl, uploadProjectName, secret, reviewP
   }
 }
 
-async function checkOnboardingInviteRoute(workerUrl, onboardingProjectName, adminToken, reviewPasscode) {
+async function checkOnboardingInviteRoute(workerUrl, onboardingProjectName, adminToken, reviewPasscode, accessHeaders) {
   if (!adminToken) {
     console.log("Skipping onboarding invite smoke check because ADMIN_TOKEN is not set.");
     return;
@@ -127,6 +152,7 @@ async function checkOnboardingInviteRoute(workerUrl, onboardingProjectName, admi
   const response = await fetch(`${workerUrl.replace(/\/$/, "")}/onboarding/invites`, {
     method: "POST",
     headers: {
+      ...(accessHeaders ?? {}),
       authorization: `Bearer ${adminToken}`,
       "content-type": "application/json",
     },
@@ -166,6 +192,14 @@ async function checkOnboardingInviteRoute(workerUrl, onboardingProjectName, admi
   ) {
     throw new Error(`Unlocked onboarding route did not render the setup flow for ${routePath}`);
   }
+}
+
+function isAccessRedirect(response) {
+  if (response.status !== 302) {
+    return false;
+  }
+  const location = response.headers.get("location") ?? "";
+  return /cloudflareaccess\.com\/cdn-cgi\/access\/login\//i.test(location);
 }
 
 async function unlockPagesHost(baseUrl, redirectPath, passcode) {

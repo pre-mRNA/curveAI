@@ -71,6 +71,7 @@ Use these env vars for migration and deploy scripts:
 - `CLOUDFLARE_ACCESS_ALLOWED_EMAIL_DOMAINS` - optional email-domain allowlist, only when you intentionally opt in to broader policies
 - `CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES` - optional `true` to allow domain-wide policies; keep this `false` for investor review
 - `CLOUDFLARE_ACCESS_SESSION_DURATION` - optional Access session duration, defaults to `24h`
+- `CLOUDFLARE_ACCESS_SERVICE_TOKEN_ID` / `CLOUDFLARE_ACCESS_SERVICE_TOKEN_SECRET` - optional service-token pair for non-interactive smoke checks against Access-protected staging
 - `CLOUDFLARE_ACCOUNT_ID` - target Cloudflare account id
 - `CLOUDFLARE_WORKERS_SUBDOMAIN` - preferred workers.dev subdomain when the account has not been initialized yet
 - `CLOUDFLARE_D1_DATABASE` - target D1 database name for `npm run migrate:d1:*` and `npm run deploy` in `apps/edge-api`
@@ -123,7 +124,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - `npm run bootstrap:cloudflare:access` provisions or updates one self-hosted Cloudflare Access app per staging host when the API token also has `Access: Apps and Policies Write`.
 - Pass `--write-wrangler` to `npm run bootstrap:cloudflare:staging -- --write-wrangler` if you want it to update the checked-in staging Worker config with the discovered D1 id and live worker URL.
 - `npm run secrets:cloudflare:staging` pushes Worker secrets plus the fallback Pages review-gate secrets from your shell env into Cloudflare.
-- `npm run smoke:cloudflare:staging` checks the live Worker `/health` endpoint, the Pages review gates, a signed photo-link path, and the onboarding invite route when the required secrets are present.
+- `npm run smoke:cloudflare:staging` now understands both fallback passcode-gated staging and Cloudflare Access-protected staging. When Access is enabled without a service token, it verifies the Access redirect perimeter and skips deeper signed-route checks. When `CLOUDFLARE_ACCESS_SERVICE_TOKEN_ID` and `CLOUDFLARE_ACCESS_SERVICE_TOKEN_SECRET` are set, it can exercise the protected Worker/API smoke path non-interactively.
 - `npm run seed:investor:demo` creates a repeatable onboarding invite, staff invite, and optional upload-link scenario for private investor review.
 - `cloudflare.staging.env.example` captures the minimal repo-side env contract for Pages + Worker staging deploys.
 - That example includes the Worker deploy-time secrets (`ADMIN_TOKEN`, `AUTOMATION_SHARED_SECRET`) but the Pages review-gate secrets still have to be provisioned on each Pages project runtime.
