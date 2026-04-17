@@ -104,6 +104,7 @@ The implementation work is a Worker rewrite of the API boundary, but the deploym
 - That fallback gate is host-local per Pages project. Reviewers will unlock each Pages host separately, and the Worker API still needs Access or equivalent account-side protection for a fully private staging environment.
 - The fallback gate now fails closed on non-local hosts if either `REVIEW_PASSCODE` or `REVIEW_COOKIE_SECRET` is missing, so an accidentally unprotected Pages deploy will return `503` instead of serving the app publicly.
 - The Access bootstrap flow now fails closed by default: it requires explicit reviewer emails.
+- When Cloudflare Access is active, the shared Pages review gate now defers to the Access identity headers instead of showing a second passcode prompt. The passcode remains as the fallback perimeter for environments where Access is not yet enabled.
 - Domain-wide allowlists are blocked unless `CLOUDFLARE_ACCESS_ALLOW_DOMAIN_POLICIES=true` is set intentionally.
 - The four Pages apps now import one shared review-gate implementation from the repo root, and `npm run test:pages-gate` exercises the fail-closed, asset-blocking, cookie-issuance, and logout paths centrally.
 - Worker route families are now origin-fenced by app surface:

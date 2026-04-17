@@ -47,6 +47,23 @@ test("allows localhost through when review protection is not configured", async 
   assert.equal(await response.text(), "local ok");
 });
 
+test("allows requests that already passed Cloudflare Access", async () => {
+  const nextResponse = new Response("access ok", { status: 200 });
+  const { context, getNextCalls } = createContext({
+    url: "https://curve-ai-onboarding.pages.dev/",
+    headers: {
+      "Cf-Access-Authenticated-User-Email": "curve_AI@outlook.com",
+    },
+    nextResponse,
+  });
+
+  const response = await onRequest(context);
+
+  assert.equal(response.status, 200);
+  assert.equal(getNextCalls(), 1);
+  assert.equal(await response.text(), "access ok");
+});
+
 test("renders the gate page for protected document requests", async () => {
   const { context } = createContext({
     url: "https://curve-ai-ops.pages.dev/dashboard?tab=jobs",

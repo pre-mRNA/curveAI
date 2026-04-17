@@ -42,6 +42,12 @@ function isLocalHost(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
+function hasCloudflareAccessIdentity(headers) {
+  const authenticatedEmail = headers.get("Cf-Access-Authenticated-User-Email")?.trim();
+  const jwtAssertion = headers.get("Cf-Access-Jwt-Assertion")?.trim();
+  return Boolean(authenticatedEmail || jwtAssertion);
+}
+
 function safeEqual(left, right) {
   if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) {
     return false;
@@ -104,6 +110,11 @@ function renderGatePage({ actionPath, redirectTo, invalidPasscode }) {
 
 export async function onRequest(context) {
   const url = new URL(context.request.url);
+  if (hasCloudflareAccessIdentity(context.request.headers)) {
+    const response = await context.next();
+    applySharedHeaders(response.headers);
+    return response;
+  }
   const passcode = context.env.REVIEW_PASSCODE?.trim();
   const cookieSecret = (context.env.REVIEW_COOKIE_SECRET ?? context.env.REVIEW_PASSCODE ?? "").trim();
   if (!passcode || !cookieSecret) {
@@ -215,6 +226,7 @@ export const reviewGateInternals = {
   applySharedHeaders,
   isAssetPath,
   isLocalHost,
+  hasCloudflareAccessIdentity,
   parseCookies,
   renderGatePage,
   sanitizeRedirect,
