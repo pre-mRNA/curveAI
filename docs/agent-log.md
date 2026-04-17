@@ -4,7 +4,7 @@
 
 ### Platform Summary
 
-- Build a greenfield platform with four surfaces: ElevenLabs-based voice onboarding and phone agents, split Cloudflare Pages browser apps plus Worker API, a phone-first staff Pages app that temporarily replaces the native pilot, and an internal web ops console.
+- Build a greenfield platform with four surfaces: ElevenLabs-based voice onboarding and phone agents, split Cloudflare Pages browser apps plus Worker API, a phone-first staff Pages app, and an internal web ops console.
 - Each staff member gets a dedicated ElevenLabs agent, personal cloned voice, calendar connection, pricing profile, and experiment assignments.
 - Core v1 actions: answer calls broadly with guardrails, give indicative or guardrailed dynamic quotes, book calendar appointments, text secure photo-upload links, create callback tasks, summarize jobs for tradies, and end calls cleanly with ElevenLabs `end_call`.
 
@@ -59,7 +59,7 @@
 - Added Worker-side D1 models for staff auth state, staff sessions, and calendar connections, plus coverage for OTP verification and staff-scoped job access.
 - Tightened the new Worker staff invite route so raw OTPs are only exposed when `ALLOW_INSECURE_TEST_OTP=true` is explicitly enabled for non-production workflows.
 - Ran a second multiagent review pass across deployment, Worker security, onboarding UX, upload UX, iOS contract drift, and cross-app design consistency before the next implementation batch.
-- Hardened the Worker config path so non-local requests fail fast when public URLs or signing secrets are missing, `/health` reports readiness warnings, `X-Staff-Session` is allowed through CORS, and photo asset signing no longer falls back to unrelated secrets.
+- Hardened the Worker config path so non-local requests fail fast when public URLs or signing secrets are missing, `/health` reports readiness warnings, browser auth/CORS rules stay aligned with the cookie-based Pages flows, and photo asset signing no longer falls back to unrelated secrets.
 - Parameterized the D1 migration scripts via `CLOUDFLARE_D1_DATABASE` instead of hardcoding the staging database name.
 - Closed an upload race in both D1 and in-memory repositories so expired or already-completed upload tokens cannot be finalized after object writes, and the Worker now cleans up staged objects if completion fails.
 - Reworked the onboarding landing page into a real recovery surface with invite-code entry, clearer step cards, and denser mobile progress UI instead of the previous dead-end info page.
@@ -84,3 +84,12 @@
 - Switched onboarding and staff browser auth to Worker-issued `HttpOnly` cookies instead of browser-visible reusable session tokens, collapsed onboarding start into a single consent + cookie issuance flow, and removed raw staff session tokens from the Worker JSON responses.
 - Made `/staff/sign-out` revoke the server-side staff session, added route-family origin fencing so public onboarding/upload Pages origins cannot read staff or ops data with ambient cookies, and covered that boundary with a new Worker test.
 - Rechecked the updated onboarding and staff mobile shells with fresh screenshots at [curve-onboarding-cookie-mobile.png](/tmp/curve-onboarding-cookie-mobile.png) and [curve-staff-cookie-mobile.png](/tmp/curve-staff-cookie-mobile.png).
+- Pruned the stale Express API workspace and deferred iOS pilot from the active repo, removed the root scripts/env/docs that still advertised them, and tightened the Worker env contract around the split Pages origins only.
+- Centralized the four Cloudflare Pages review-gate middlewares into one shared repo module, added a root `npm run test:pages-gate` suite for fail-closed/cookie/logout coverage, and updated the deployment docs so the fallback Pages protection is treated as one canonical, tested path.
+- Turned the Worker `openai-compatible` label into a real OpenAI Responses integration for onboarding analysis and AI test runner/judge flows, added env/model fallbacks plus coverage for that contract, and updated local edge dev so shell `OPENAI_API_KEY` and the repo-root `secrets` alias can hydrate the untracked Worker dev vars automatically.
+- Split Worker readiness into blocking platform issues versus advisory provider issues, so `/health` now explains partial ElevenLabs/OpenAI/Microsoft setup without taking non-local traffic offline unless core platform config is actually broken. Also normalized the checked-in default provider label to `mock` and made the local edge-dev secret sync clean stale auto-managed provider entries back out instead of leaving accidental paid-provider config behind.
+- Added a persistent weak-feature review to `docs/mvp-board.md` so the current shallow areas are tracked explicitly: AI test studio realism, temporary staff calendar setup, mock-tolerant calendar/voice providers, thin voice-tool workflows, flat onboarding review UX, and unresolved staff/onboarding convergence.
+- Extended the Worker integration layer beyond onboarding-only auth: configured-mode local tests now exercise real mock provider endpoints for ElevenLabs signed URLs, Microsoft OAuth/profile/calendar/event creation, and Twilio-compatible SMS delivery.
+- Upgraded `/voice/tools/appointment` to attempt provider-backed Microsoft calendar event creation when a staff calendar connection includes an external provider token, and upgraded `/voice/tools/send-photo-link` to attempt provider-backed SMS delivery while still creating the local upload request.
+- Added a presentation-grade investor deck at `docs/investor-deck.html`, backed it with explicit source notes in `docs/investor-deck-sources.md`, separated optional naming/design exploration into `docs/name-and-design-options.md`, and ran multiagent review to make the deck canonical to the current Pages + Worker product rather than a speculative future-state narrative.
+- Sanitized staff calendar responses so external provider connection tokens no longer round-trip back to the browser once calendar integration uses them as real provider credentials.

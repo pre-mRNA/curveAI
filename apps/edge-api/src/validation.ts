@@ -135,8 +135,14 @@ export const staffCalendarConnectInputSchema = z
     provider: z.literal("outlook").default("outlook"),
     accountEmail: z.string().min(1).optional(),
     calendarId: z.string().min(1).optional(),
+    calendarLabel: z.string().min(1).optional(),
     timezone: z.string().min(1).optional(),
-    externalConnectionId: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const staffCalendarDisconnectInputSchema = z
+  .object({
+    staffId: z.string().min(1),
   })
   .strict();
 
@@ -229,6 +235,7 @@ export const voiceAppointmentInputSchema = z
   .object({
     jobId: z.string().min(1).optional(),
     staffId: z.string().min(1).optional(),
+    callerPhone: z.string().min(3).optional(),
     startAt: z.string().min(1).optional(),
     endAt: z.string().min(1).optional(),
     timezone: z.string().min(1).optional(),

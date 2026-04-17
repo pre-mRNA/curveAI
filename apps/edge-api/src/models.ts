@@ -113,12 +113,14 @@ export interface RealtimeVoiceSession {
 export interface CalendarConnectionSummary {
   provider: string;
   mode: ProviderMode;
-  status: "pending" | "connected";
+  status: "pending" | "connected" | "error";
   authUrl?: string;
   authState?: string;
   accountEmail?: string;
+  calendarId?: string;
   calendarLabel?: string;
   connectedAt?: string;
+  lastError?: string;
 }
 
 export interface VoiceSampleAssessment {
@@ -271,6 +273,41 @@ export interface CallRecord {
   updatedAt: string;
 }
 
+export interface CustomerJobSnapshot {
+  jobId: string;
+  staffId?: string;
+  status: JobStatus;
+  summary?: string;
+  suburb?: string;
+  quotedPrice?: number;
+  photoCount: number;
+  updatedAt: string;
+}
+
+export interface CustomerProfile {
+  id: string;
+  displayName?: string;
+  phoneNumber?: string;
+  normalizedPhone?: string;
+  email?: string;
+  normalizedEmail?: string;
+  address?: string;
+  location?: JobLocation;
+  latestSummary?: string;
+  latestCallSummary?: string;
+  latestCallAt?: string;
+  lastJobId?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastContactAt: string;
+  totalJobs: number;
+  totalCalls: number;
+  totalUploads: number;
+  totalPhotos: number;
+  knownStaffIds: string[];
+  recentJobs: CustomerJobSnapshot[];
+}
+
 export interface JobRecord {
   id: string;
   staffId?: string;
@@ -295,6 +332,7 @@ export interface JobRecord {
 export interface JobCardEnvelope {
   job: JobRecord;
   staff?: StaffProfileSummary;
+  customer?: CustomerProfile;
   quotes: QuoteRecord[];
   photos: JobPhoto[];
   calls: CallRecord[];
@@ -378,13 +416,22 @@ export interface PricingProfileRecord {
   confidenceFloor: number;
 }
 
+export type CalendarConnectionStatus = "pending" | "connected" | "error";
+
 export interface CalendarConnectionRecord {
   provider: "outlook";
+  status: CalendarConnectionStatus;
   accountEmail?: string;
   calendarId?: string;
+  calendarLabel?: string;
   timezone?: string;
-  externalConnectionId?: string;
-  connectedAt: string;
+  authState?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  lastError?: string;
+  connectedAt?: string;
+  updatedAt?: string;
 }
 
 export interface StaffRecord extends StaffProfileSummary {
@@ -468,6 +515,8 @@ export interface AiTestRunnerResultRecord {
   model: string;
   outputText: string;
   toolCalls: string[];
+  executionMode?: "simulated" | "worker-route";
+  observedEffects?: string[];
   latencyMs: number;
   fallbackUsed: boolean;
   fallbackReason?: string;

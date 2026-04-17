@@ -32,7 +32,7 @@ describe('onboarding app routing', () => {
       const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
       const method = init?.method ?? 'GET';
       if (url.pathname.endsWith('/onboarding/invites/invite-123/session') && method === 'GET') {
-        return jsonResponse({ error: 'No resumable session' }, 401);
+        return jsonResponse({ error: { message: 'No resumable session' } }, 401);
       }
       return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
     });
@@ -45,17 +45,18 @@ describe('onboarding app routing', () => {
   it('shows the onboarding landing page at the root route', () => {
     renderRoute('/');
 
-    expect(screen.getByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/invite-gated/i)).not.toHaveLength(0);
-    expect(screen.getByRole('button', { name: /open onboarding/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /set up your phone assistant in one go/i })).toBeInTheDocument();
+    expect(screen.getByText(/^10 minutes$/i)).toBeInTheDocument();
+    expect(screen.getByText(/what you get/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start setup/i })).toBeInTheDocument();
   });
 
   it('keeps the invite route available for the onboarding flow', async () => {
     renderRoute('/onboard/invite-123');
 
-    expect(await screen.findByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
-    expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /begin interview/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /set up your assistant/i })).toBeInTheDocument();
+    expect(screen.getByText(/private setup link/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start setup/i })).toBeInTheDocument();
   });
 
   it('lets the landing page recover a session from an invite code', async () => {
@@ -63,8 +64,8 @@ describe('onboarding app routing', () => {
     renderRoute('/');
 
     await user.type(screen.getByLabelText(/invite code/i), 'invite-123');
-    await user.click(screen.getByRole('button', { name: /open onboarding/i }));
+    await user.click(screen.getByRole('button', { name: /start setup/i }));
 
-    expect(await screen.findByText('invite-123', { selector: 'code' })).toBeInTheDocument();
+    expect(await screen.findByText(/private setup link/i)).toBeInTheDocument();
   });
 });

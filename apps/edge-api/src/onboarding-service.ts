@@ -9,6 +9,7 @@ import type {
   OnboardingChecklistPrompt,
   OnboardingSessionRecord,
   OnboardingSessionSummary,
+  StaffRecord,
   VoiceSampleAssessment,
 } from "./models.js";
 import { createDefaultAnalysis, normalizeReview } from "./models.js";
@@ -94,6 +95,31 @@ export class OnboardingService {
     };
   }
 
+  async launchForStaff(staff: StaffRecord): Promise<{ summary: OnboardingSessionSummary; participantToken: string; url: string }> {
+    let invite = await this.options.repo.getLatestInviteByStaffId(staff.id);
+    if (!invite || isExpired(invite.expiresAt) || invite.status === "completed") {
+      invite = await this.createInviteForStaff(staff);
+    }
+
+    const activeSession = invite.sessionId ? await this.options.repo.getSessionById(invite.sessionId) : undefined;
+    if (activeSession && !isExpired(activeSession.expiresAt) && activeSession.status !== "completed") {
+      const resumed = await this.issueSessionAccessToken(activeSession);
+      return {
+        ...resumed,
+        url: this.inviteUrl(invite.code),
+      };
+    }
+
+    const started = await this.startSession(invite.code);
+    if (!started) {
+      throw new OnboardingRuleError("Could not start the setup session for this staff profile.", 500);
+    }
+    return {
+      ...started,
+      url: this.inviteUrl(invite.code),
+    };
+  }
+
   async startSession(inviteCode: string): Promise<{ summary: OnboardingSessionSummary; participantToken: string } | undefined> {
     const invite = await this.options.repo.getInviteByCode(inviteCode);
     if (!invite || isExpired(invite.expiresAt) || invite.status === "completed") {
@@ -111,6 +137,7 @@ export class OnboardingService {
       );
     }
     if (!session || isExpired(session.expiresAt) || session.status === "completed") {
+      const starterPrompt = onboardingChecklist[0];
       session = {
         id: createId("sess"),
         inviteId: invite.id,
@@ -124,7 +151,19 @@ export class OnboardingService {
         cloneConsentAccepted: false,
         createdAt: now,
         updatedAt: now,
-        analysis: createDefaultAnalysis(),
+        analysis: {
+          ...createDefaultAnalysis(),
+          recommendedQuestions: starterPrompt
+            ? [
+                {
+                  id: starterPrompt.id,
+                  section: starterPrompt.section,
+                  reason: "Start by establishing the core work types the agent should qualify.",
+                  question: starterPrompt.prompt,
+                },
+              ]
+            : [],
+        },
         review: normalizeReview(undefined, invite.fullName, invite.role),
       };
       invite.sessionId = session.id;
@@ -137,6 +176,16 @@ export class OnboardingService {
       summary: this.toSessionSummary(session, turns, rawParticipantToken),
       participantToken: rawParticipantToken,
     };
+  }
+
+  async rollbackSessionStart(inviteCode: string, sessionId: string): Promise<void> {
+    const invite = await this.options.repo.getInviteByCode(inviteCode);
+    if (!invite || invite.sessionId !== sessionId) {
+      return;
+    }
+    invite.sessionId = undefined;
+    invite.status = "pending";
+    await this.options.repo.saveInvite(invite);
   }
 
   async authenticateSession(sessionId: string, token: string): Promise<OnboardingSessionRecord | undefined> {
@@ -165,6 +214,42 @@ export class OnboardingService {
     }
   }
 
+  private async createInviteForStaff(staff: StaffRecord): Promise<InviteRecord> {
+    const now = new Date();
+    const invite: InviteRecord = {
+      id: createId("invite"),
+      code: createInviteCode(),
+      staffId: staff.id,
+      fullName: staff.fullName,
+      email: staff.email,
+      phoneNumber: staff.phoneNumber,
+      role: staff.role,
+      status: "pending",
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+    };
+    await this.options.repo.createInvite(invite);
+    return invite;
+  }
+
+  private inviteUrl(inviteCode: string): string {
+    return new URL(`/onboard/${inviteCode}`, this.options.config.publicOnboardingAppUrl).toString();
+  }
+
+  private async issueSessionAccessToken(
+    session: OnboardingSessionRecord,
+  ): Promise<{ summary: OnboardingSessionSummary; participantToken: string }> {
+    const participantToken = createParticipantToken();
+    session.participantTokenHash = await sha256Hex(participantToken);
+    session.updatedAt = new Date().toISOString();
+    await this.options.repo.saveSession(session);
+    const turns = await this.options.repo.listTurns(session.id);
+    return {
+      summary: this.toSessionSummary(session, turns, participantToken),
+      participantToken,
+    };
+  }
+
   async provisionRealtimeVoice(
     session: OnboardingSessionRecord,
     input: { consentAccepted: boolean; cloneConsentAccepted: boolean },
@@ -177,13 +262,11 @@ export class OnboardingService {
     }
 
     this.ensureMutable(session, "start a new realtime interview");
-    session.consentAccepted = input.consentAccepted;
-    session.cloneConsentAccepted = input.cloneConsentAccepted;
     const voiceSession = await this.options.providers.realtimeVoice.issueBrowserSession({
       sessionId: session.id,
-      staffName: session.review.staffProfile.staffName.trim() || session.staffName,
-      consentAccepted: session.consentAccepted,
     });
+    session.consentAccepted = input.consentAccepted;
+    session.cloneConsentAccepted = input.cloneConsentAccepted;
     session.voiceSession = voiceSession;
     session.status = "interviewing";
     session.updatedAt = new Date().toISOString();
@@ -257,10 +340,9 @@ export class OnboardingService {
   async startCalendar(session: OnboardingSessionRecord) {
     this.ensureMutable(session, "start calendar authorization");
     const calendar = await this.options.providers.calendar.startAuth({
-      sessionId: session.id,
-      inviteCode: session.inviteCode,
       staffName: session.review.staffProfile.staffName.trim() || session.staffName,
       publicApiUrl: this.options.config.publicApiUrl,
+      redirectUri: `${this.options.config.publicApiUrl.replace(/\/$/, "")}/onboarding/calendar/microsoft/callback`,
     });
     session.calendar = calendar;
     session.status = calendar.status === "connected" ? "voice_sample" : "calendar";
@@ -270,9 +352,29 @@ export class OnboardingService {
     return this.getSessionSummary(session);
   }
 
+  async markCalendarUnavailable(session: OnboardingSessionRecord, message: string) {
+    this.ensureMutable(session, "mark calendar authorization unavailable");
+    session.calendar = {
+      provider: "microsoft",
+      mode: this.options.providers.calendar.mode,
+      status: "error",
+      authUrl: undefined,
+      authState: undefined,
+      accountEmail: session.calendar?.accountEmail,
+      calendarLabel: session.calendar?.calendarLabel,
+      connectedAt: session.calendar?.connectedAt,
+      lastError: message,
+    };
+    session.status = "calendar";
+    session.updatedAt = new Date().toISOString();
+    await this.options.repo.saveSession(session);
+    await this.touchCoordinator(session.id, "calendar-unavailable", session.status);
+    return this.getSessionSummary(session);
+  }
+
   async completeCalendar(
     state: string,
-    input: { code?: string; accountEmail?: string; calendarLabel?: string },
+    input: { code?: string; accountEmail?: string; calendarLabel?: string; redirectUri?: string },
   ) {
     const session = await this.options.repo.getSessionByCalendarState(state);
     if (!session) {
@@ -286,19 +388,53 @@ export class OnboardingService {
       throw new OnboardingRuleError("Microsoft returned no authorization code.", 400);
     }
 
-    const calendar = await this.options.providers.calendar.completeAuth({
+    const completed = await this.options.providers.calendar.completeAuth({
       state,
       code: input.code,
       accountEmail: input.accountEmail,
       calendarLabel: input.calendarLabel,
+      redirectUri: input.redirectUri,
     });
+    const updatedAt = new Date().toISOString();
+    const invite = await this.options.repo.getInviteById(session.inviteId);
+    await this.options.repo.upsertStaffProfile({
+      staffId: session.staffId,
+      fullName: session.review.staffProfile.staffName.trim() || session.staffName,
+      phoneNumber: invite?.phoneNumber,
+      email: invite?.email,
+      role: session.review.staffProfile.role || invite?.role,
+      companyName: session.review.staffProfile.companyName || undefined,
+      calendarProvider: "outlook",
+      communication: undefined,
+      pricing: undefined,
+      business: undefined,
+      crm: undefined,
+      updatedAt,
+    });
+    await this.options.repo.saveStaffCalendarConnection({
+      staffId: session.staffId,
+      provider: "outlook",
+      status: completed.summary.status,
+      accountEmail: completed.summary.accountEmail,
+      calendarId: completed.summary.calendarId,
+      calendarLabel: completed.summary.calendarLabel,
+      timezone: undefined,
+      authState: undefined,
+      accessToken: completed.credential?.accessToken,
+      refreshToken: completed.credential?.refreshToken,
+      tokenExpiresAt: completed.credential?.tokenExpiresAt,
+      lastError: undefined,
+      connectedAt: completed.summary.connectedAt ?? updatedAt,
+      updatedAt,
+    });
+    session.review.staffProfile.calendarProvider = "outlook";
     session.calendar = {
-      ...calendar,
+      ...completed.summary,
       authState: undefined,
       authUrl: undefined,
     };
     session.status = "voice_sample";
-    session.updatedAt = new Date().toISOString();
+    session.updatedAt = updatedAt;
     await this.options.repo.saveSession(session);
     await this.touchCoordinator(session.id, "calendar-complete", session.status);
     return this.getSessionSummary(session);
@@ -359,19 +495,8 @@ export class OnboardingService {
       throw new OnboardingRuleError("Upload a voice sample before finalizing onboarding.", 400);
     }
 
-    session.status = "completed";
-    session.finalizedAt = new Date().toISOString();
-    session.updatedAt = session.finalizedAt;
-    session.participantTokenHash = await sha256Hex(createParticipantToken());
-    await this.options.repo.saveSession(session);
-
     const invite = await this.options.repo.getInviteById(session.inviteId);
-    if (invite) {
-      invite.status = "completed";
-      invite.sessionId = session.id;
-      await this.options.repo.saveInvite(invite);
-    }
-
+    const finalizedAt = new Date().toISOString();
     const effectiveName = session.review.staffProfile.staffName.trim() || session.staffName;
     await Promise.all([
       this.options.repo.upsertStaffProfile({
@@ -386,7 +511,7 @@ export class OnboardingService {
         pricing: session.review.pricingProfile,
         business: session.review.businessPractices,
         crm: session.review.crmDiscovery,
-        updatedAt: session.updatedAt,
+        updatedAt: finalizedAt,
       }),
       this.options.repo.recordVoiceConsent({
         staffId: session.staffId,
@@ -404,10 +529,23 @@ export class OnboardingService {
           salesStyle: session.review.communicationProfile.salesStyle,
           crm: session.review.crmDiscovery.currentSystem,
         },
-        capturedAt: session.updatedAt,
+        capturedAt: finalizedAt,
       }),
-      this.touchCoordinator(session.id, "finalize", session.status),
     ]);
+
+    session.status = "completed";
+    session.finalizedAt = finalizedAt;
+    session.updatedAt = finalizedAt;
+    session.participantTokenHash = await sha256Hex(createParticipantToken());
+    await this.options.repo.saveSession(session);
+
+    if (invite) {
+      invite.status = "completed";
+      invite.sessionId = session.id;
+      await this.options.repo.saveInvite(invite);
+    }
+
+    await this.touchCoordinator(session.id, "finalize", session.status);
 
     return {
       session: await this.getSessionSummary(session),

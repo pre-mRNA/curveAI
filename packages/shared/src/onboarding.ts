@@ -109,12 +109,13 @@ export const realtimeVoiceSessionSchema = z.object({
 export const calendarConnectionSummarySchema = z.object({
   provider: z.string(),
   mode: onboardingProviderModeSchema,
-  status: z.enum(["pending", "connected"]),
+  status: z.enum(["pending", "connected", "error"]),
   authUrl: z.string().optional(),
   authState: z.string().optional(),
   accountEmail: z.string().optional(),
   calendarLabel: z.string().optional(),
   connectedAt: z.string().optional(),
+  lastError: z.string().optional(),
 });
 
 export const voiceSampleAssessmentSchema = z.object({

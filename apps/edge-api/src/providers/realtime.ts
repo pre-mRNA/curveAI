@@ -5,8 +5,6 @@ export interface RealtimeVoiceProvider {
   readonly mode: ProviderMode;
   issueBrowserSession(input: {
     sessionId: string;
-    staffName: string;
-    consentAccepted: boolean;
   }): Promise<RealtimeVoiceSession>;
 }
 

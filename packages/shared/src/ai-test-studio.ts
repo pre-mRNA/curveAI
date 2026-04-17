@@ -43,6 +43,8 @@ export const aiTestRunnerResultSchema = z.object({
   model: z.string(),
   outputText: z.string(),
   toolCalls: z.array(z.string()),
+  executionMode: z.enum(["simulated", "worker-route"]).optional(),
+  observedEffects: z.array(z.string()).optional(),
   latencyMs: z.number().nonnegative(),
   fallbackUsed: z.boolean().default(false),
   fallbackReason: z.string().optional(),

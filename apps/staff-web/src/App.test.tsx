@@ -35,13 +35,24 @@ describe('staff web app', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: /checking for an active secure staff session/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /checking if you are already signed in/i })).toBeInTheDocument();
     resolveProfileRequest(jsonResponse({ error: { message: 'Authentication is required' } }, { status: 401 }));
-    expect(await screen.findByRole('heading', { name: /verify the staff session/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /open staff console/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /^sign in$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open jobs/i })).toBeInTheDocument();
   });
 
-  it('verifies the OTP and loads the queue with the worker-backed browser session', async () => {
+  it('shows a service error when staff bootstrap fails for a non-auth reason', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ error: { message: 'Worker misconfigured' } }, { status: 500 }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /^sign in$/i })).toBeInTheDocument();
+    expect(screen.getByText(/could not reach your jobs right now\. try again in a moment\./i)).toBeInTheDocument();
+  });
+
+  it('verifies the 6 digit code and loads the queue with the worker-backed browser session', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
 
@@ -60,7 +71,6 @@ describe('staff web app', () => {
             timezone: 'Australia/Sydney',
           },
           session: {
-            token: 'staff-session-token',
             expiresAt: '2099-01-01T00:00:00.000Z',
           },
         });
@@ -117,16 +127,97 @@ describe('staff web app', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByRole('heading', { name: /verify the staff session/i });
+    await screen.findByRole('heading', { name: /^sign in$/i });
 
-    await user.type(screen.getByLabelText(/invite token/i), 'invite-token');
-    await user.type(screen.getByLabelText(/^otp$/i), '123456');
-    await user.click(screen.getByRole('button', { name: /open staff console/i }));
+    await user.type(screen.getByLabelText(/invite code/i), 'invite-token');
+    await user.type(screen.getByLabelText(/6 digit code/i), '123456');
+    await user.click(screen.getByRole('button', { name: /open jobs/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /live jobs assigned to this staff session/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /your jobs/i })).toBeInTheDocument();
     });
-    expect(screen.getAllByText(/blocked stormwater drain/i)).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByText(/blocked stormwater drain/i)).toHaveLength(2);
+    });
+    expect(screen.getByRole('link', { name: /call customer/i })).toHaveAttribute('href', 'tel:+61433333333');
+    expect(screen.getByText(/current price/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('opens the canonical setup flow from the setup tab', async () => {
+    const assignMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        assign: assignMock,
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith('/staff/me')) {
+        return jsonResponse({ error: { message: 'Authentication is required' } }, { status: 401 });
+      }
+
+      if (url.endsWith('/staff/verify-otp')) {
+        return jsonResponse({
+          staff: {
+            id: 'staff_1',
+            fullName: 'Jordan Tradie',
+            role: 'Owner',
+            voiceConsentStatus: 'pending',
+            timezone: 'Australia/Sydney',
+            setup: {
+              status: 'in_progress',
+              currentStep: 'review',
+            },
+          },
+          session: {
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          },
+        });
+      }
+
+      if (url.endsWith('/jobs')) {
+        return jsonResponse({ jobs: [] });
+      }
+
+      if (url.endsWith('/staff/setup/launch')) {
+        expect(init?.method).toBe('POST');
+        return jsonResponse({
+          ok: true,
+          launchUrl: 'https://curve-ai-onboarding.pages.dev/onboard/invite_123',
+          setup: {
+            status: 'in_progress',
+            currentStep: 'review',
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('heading', { name: /^sign in$/i });
+
+    await user.type(screen.getByLabelText(/invite code/i), 'invite-token');
+    await user.type(screen.getByLabelText(/6 digit code/i), '123456');
+    await user.click(screen.getByRole('button', { name: /open jobs/i }));
+
+    await screen.findByRole('heading', { name: /your jobs/i });
+    await user.click(screen.getByRole('button', { name: /setup/i }));
+
+    expect(screen.getByText(/the private setup page is now the main place to finish how the assistant works/i)).toBeInTheDocument();
+    expect(screen.getByText(/check details/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /continue setup/i }));
+
+    await waitFor(() => {
+      expect(assignMock).toHaveBeenCalledWith('https://curve-ai-onboarding.pages.dev/onboard/invite_123');
+    });
   });
 });

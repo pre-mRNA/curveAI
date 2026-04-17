@@ -1,10 +1,10 @@
 import type {
   CalendarConnectResponse,
-  DashboardPayload,
   OnboardingConsentPayload,
   OnboardingFinalizeResponse,
   OnboardingNextQuestionResponse,
   OnboardingReview,
+  OnboardingReviewSaveResponse,
   OnboardingReviewUpdate,
   OnboardingSession,
   OnboardingSessionStartResponse,
@@ -38,28 +38,15 @@ export class ApiError extends Error {
   }
 }
 
-type AuthOptions = {
-  adminToken?: string;
-  bearerToken?: string;
-};
-
-function createHeaders(initHeaders?: HeadersInit, auth?: AuthOptions): Headers {
-  const headers = new Headers(initHeaders ?? {});
-
-  if (auth?.adminToken) {
-    headers.set('Authorization', `Bearer ${auth.adminToken}`);
-  } else if (auth?.bearerToken) {
-    headers.set('Authorization', `Bearer ${auth.bearerToken}`);
-  }
-
-  return headers;
+function createHeaders(initHeaders?: HeadersInit): Headers {
+  return new Headers(initHeaders ?? {});
 }
 
-async function requestJson<T>(path: string, init?: RequestInit, auth?: AuthOptions): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: 'include',
-    headers: createHeaders(init?.headers, auth),
+    headers: createHeaders(init?.headers),
   });
 
   const responseText = await response.text().catch(() => '');
@@ -154,6 +141,9 @@ function mapSession(session: BackendSessionSummary): OnboardingSession {
     staffName: session.staffName,
     companyName: session.review.staffProfile.companyName,
     calendarConnected: session.calendar?.status === 'connected',
+    calendarStatus: session.calendar?.status,
+    calendarMode: session.calendar?.mode,
+    calendarError: session.calendar?.lastError,
     voiceSampleUploaded: Boolean(session.voiceSample),
     updatedAt: session.updatedAt ?? new Date().toISOString(),
   };
@@ -199,18 +189,6 @@ function splitTextList(value: string | undefined): string[] | undefined {
 }
 
 export const apiClient = {
-  async getDashboard(adminToken: string): Promise<DashboardPayload> {
-    try {
-      return await requestJson<DashboardPayload>('/dashboard', undefined, { adminToken });
-    } catch (error) {
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-        throw error;
-      }
-
-      throw new Error(error instanceof Error ? error.message : 'Dashboard request failed');
-    }
-  },
-
   async startOnboardingSession(
     inviteCode: string,
     consent: OnboardingConsentPayload,
@@ -246,22 +224,12 @@ export const apiClient = {
     }
   },
 
-  async getOnboardingSession(sessionId: string, sessionToken?: string): Promise<OnboardingSession> {
-    const response = await requestJson<BackendSessionEnvelope>(
-      `/onboarding/sessions/${encodeURIComponent(sessionId)}`,
-      undefined,
-      {
-        bearerToken: sessionToken,
-      },
-    );
+  async getOnboardingSession(sessionId: string): Promise<OnboardingSession> {
+    const response = await requestJson<BackendSessionEnvelope>(`/onboarding/sessions/${encodeURIComponent(sessionId)}`);
     return mapSession(response.session);
   },
 
-  async getOnboardingSessionToken(): Promise<never> {
-    throw new Error('The onboarding session token is issued during session start.');
-  },
-
-  async submitOnboardingTurn(sessionId: string, sessionToken: string | undefined, turn: OnboardingTurnPayload): Promise<OnboardingSession> {
+  async submitOnboardingTurn(sessionId: string, turn: OnboardingTurnPayload): Promise<OnboardingSession> {
     const response = await requestJson<BackendSessionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/turns`,
       {
@@ -274,21 +242,15 @@ export const apiClient = {
           text: turn.text,
         }),
       },
-      {
-        bearerToken: sessionToken,
-      },
     );
     return mapSession(response.session);
   },
 
-  async requestOnboardingNextQuestion(sessionId: string, sessionToken?: string): Promise<OnboardingNextQuestionResponse> {
+  async requestOnboardingNextQuestion(sessionId: string): Promise<OnboardingNextQuestionResponse> {
     const response = await requestJson<BackendNextQuestionEnvelope>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/next-question`,
       {
         method: 'POST',
-      },
-      {
-        bearerToken: sessionToken,
       },
     );
     return {
@@ -297,22 +259,12 @@ export const apiClient = {
     };
   },
 
-  async getOnboardingReview(sessionId: string, sessionToken?: string): Promise<OnboardingReview> {
-    const response = await requestJson<BackendReviewEnvelope>(
-      `/onboarding/sessions/${encodeURIComponent(sessionId)}/review`,
-      undefined,
-      {
-        bearerToken: sessionToken,
-      },
-    );
+  async getOnboardingReview(sessionId: string): Promise<OnboardingReview> {
+    const response = await requestJson<BackendReviewEnvelope>(`/onboarding/sessions/${encodeURIComponent(sessionId)}/review`);
     return mapReview(response.review, response.analysis);
   },
 
-  async saveOnboardingReview(
-    sessionId: string,
-    sessionToken: string | undefined,
-    review: OnboardingReviewUpdate,
-  ): Promise<OnboardingReview> {
+  async saveOnboardingReview(sessionId: string, review: OnboardingReviewUpdate): Promise<OnboardingReviewSaveResponse> {
     const response = await requestJson<BackendSessionEnvelope>(`/onboarding/sessions/${encodeURIComponent(sessionId)}/review`, {
       method: 'POST',
       headers: {
@@ -346,34 +298,31 @@ export const apiClient = {
         },
         missingFields: review.missingItems,
       }),
-    }, {
-      bearerToken: sessionToken,
     });
-    return mapReview(response.session.review, response.session.analysis);
+    return {
+      review: mapReview(response.session.review, response.session.analysis),
+      session: mapSession(response.session),
+    };
   },
 
-  async startMicrosoftCalendarConnect(
-    sessionId: string,
-    sessionToken?: string,
-  ): Promise<CalendarConnectResponse> {
+  async startMicrosoftCalendarConnect(sessionId: string): Promise<CalendarConnectResponse> {
     const response = await requestJson<BackendCalendarStartResponse>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/calendar/microsoft/start`,
-      undefined,
-      {
-        bearerToken: sessionToken,
-      },
     );
     return {
       authorizationUrl: response.calendar?.authUrl,
       connected: response.calendar?.status === 'connected',
+      status: response.calendar?.status,
+      mode: response.calendar?.mode,
+      message: response.calendar?.lastError,
       provider: 'microsoft',
       accountEmail: response.calendar?.accountEmail,
+      session: response.session ? mapSession(response.session) : undefined,
     };
   },
 
   async uploadOnboardingVoiceSample(
     sessionId: string,
-    sessionToken: string | undefined,
     sample: {
       blob?: Blob;
       sampleLabel: string;
@@ -398,8 +347,6 @@ export const apiClient = {
     const response = await requestJson<BackendSessionEnvelope>(`/onboarding/sessions/${encodeURIComponent(sessionId)}/voice-sample`, {
       method: 'POST',
       body: formData,
-    }, {
-      bearerToken: sessionToken,
     });
     return {
       uploaded: Boolean(response.session.voiceSample),
@@ -409,14 +356,11 @@ export const apiClient = {
     };
   },
 
-  async finalizeOnboarding(sessionId: string, sessionToken?: string): Promise<OnboardingFinalizeResponse> {
+  async finalizeOnboarding(sessionId: string): Promise<OnboardingFinalizeResponse> {
     const response = await requestJson<{ session: BackendSessionSummary; staff?: { id?: string } }>(
       `/onboarding/sessions/${encodeURIComponent(sessionId)}/finalize`,
       {
-      method: 'POST',
-      },
-      {
-        bearerToken: sessionToken,
+        method: 'POST',
       },
     );
     return {
@@ -424,21 +368,5 @@ export const apiClient = {
       staffId: response.staff?.id,
       summary: response.session.review.businessSummary,
     };
-  },
-
-  async uploadPhotos(token: string, files: File[]): Promise<{ ok: true; uploaded: number }> {
-    const formData = new FormData();
-    files.forEach((file) => formData.append('photos', file));
-
-    const response = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(token)}/photos`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new ApiError(response.status, `Upload failed: ${response.status}`);
-    }
-
-    return (await response.json()) as { ok: true; uploaded: number };
   },
 };

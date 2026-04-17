@@ -3,10 +3,27 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+function manualVendorChunks(id: string): string | undefined {
+  if (!id.includes('node_modules')) {
+    return undefined;
+  }
+  if (id.includes('react-dom') || id.includes('/react/') || id.includes('\\react\\') || id.includes('scheduler')) {
+    return 'react-vendor';
+  }
+  return 'vendor';
+}
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5176,
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: manualVendorChunks,
+      },
+    },
   },
   test: {
     environment: 'jsdom',

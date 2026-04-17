@@ -5,6 +5,7 @@ import type {
   CalendarConnectionRecord,
   CallbackTaskRecord,
   CallRecord,
+  CustomerProfile,
   DashboardPayload,
   DashboardExperiment,
   InterviewTurn,
@@ -121,6 +122,7 @@ export interface OnboardingRepository {
   saveInvite(invite: InviteRecord): Promise<void>;
   getInviteByCode(code: string): Promise<InviteRecord | undefined>;
   getInviteById(id: string): Promise<InviteRecord | undefined>;
+  getLatestInviteByStaffId(staffId: string): Promise<InviteRecord | undefined>;
   saveSession(session: OnboardingSessionRecord): Promise<void>;
   getSessionById(id: string): Promise<OnboardingSessionRecord | undefined>;
   getSessionByCalendarState(state: string): Promise<OnboardingSessionRecord | undefined>;
@@ -137,8 +139,11 @@ export interface OnboardingRepository {
   getStaffSession(tokenHash: string): Promise<StaffSessionRecord | undefined>;
   deleteStaffSession(tokenHash: string): Promise<void>;
   saveStaffCalendarConnection(input: StaffCalendarConnectionInput): Promise<CalendarConnectionRecord>;
+  getStaffByCalendarAuthState(state: string): Promise<StaffRecord | undefined>;
+  deleteStaffCalendarConnection(staffId: string): Promise<void>;
   listJobs(staffId?: string): Promise<JobRecord[]>;
   getJobCard(jobId: string): Promise<JobCardEnvelope | undefined>;
+  getCustomerProfile(customerId: string): Promise<CustomerProfile | undefined>;
   listCallbacks(staffId?: string): Promise<CallbackTaskRecord[]>;
   listExperiments(): Promise<DashboardExperiment[]>;
   ensureJob(input: JobUpsertInput): Promise<JobRecord>;

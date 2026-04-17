@@ -9,6 +9,7 @@ import {
   type CalendarConnectionRecord,
   type CallbackTaskRecord,
   type CallRecord,
+  type CustomerProfile,
   type DashboardExperiment,
   type DashboardPayload,
   type InterviewTurn,
@@ -125,11 +126,17 @@ interface StaffSessionRow {
 interface StaffCalendarConnectionRow {
   staff_id: string;
   provider: "outlook";
+  status: "pending" | "connected" | "error";
   account_email: string | null;
   calendar_id: string | null;
+  calendar_label: string | null;
   timezone: string | null;
-  external_connection_id: string | null;
-  connected_at: string;
+  auth_state: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  last_error: string | null;
+  connected_at: string | null;
   updated_at: string;
 }
 
@@ -247,6 +254,26 @@ interface UploadRequestRow {
   expires_at: string;
   completed_at: string | null;
   file_count: number;
+}
+
+interface CustomerRow {
+  id: string;
+  display_name: string | null;
+  phone_number: string | null;
+  normalized_phone: string | null;
+  email: string | null;
+  normalized_email: string | null;
+  address: string | null;
+  location_json: string | null;
+  latest_summary: string | null;
+  latest_call_summary: string | null;
+  latest_call_at: string | null;
+  last_job_id: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_contact_at: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ExperimentRow {
@@ -382,6 +409,10 @@ function toJobLocation(value: JobLocation | undefined): string | undefined {
   return value.label ?? value.suburb ?? value.address;
 }
 
+function toCustomerSuburb(value: JobLocation | undefined, address?: string): string | undefined {
+  return value?.label ?? value?.suburb ?? address;
+}
+
 function defaultJobSummary(job: JobRecord): string {
   return job.summary ?? job.issue ?? "Awaiting call summary";
 }
@@ -488,6 +519,67 @@ function redactUploadLink(uploadLink: string): string {
   }
 }
 
+function normalizePhoneNumber(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const plusPrefixed = trimmed.startsWith("+");
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) {
+    return undefined;
+  }
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+  if (plusPrefixed) {
+    return `+${digits}`;
+  }
+  if (/^0\d{9}$/.test(digits)) {
+    return `+61${digits.slice(1)}`;
+  }
+  if (/^61\d{9}$/.test(digits)) {
+    return `+${digits}`;
+  }
+  return digits.length >= 8 ? `+${digits}` : digits;
+}
+
+function normalizeEmail(value?: string): string | undefined {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed ? trimmed : undefined;
+}
+
+function choosePreferredDisplayName(candidate?: string | null, existing?: string | null): string | undefined {
+  const nextValue = candidate?.trim();
+  const currentValue = existing?.trim();
+  if (!nextValue) {
+    return currentValue || undefined;
+  }
+  if (!currentValue) {
+    return nextValue;
+  }
+
+  const sameIgnoringCase = nextValue.localeCompare(currentValue, undefined, { sensitivity: "accent" }) === 0;
+  if (sameIgnoringCase) {
+    return nextValue.length >= currentValue.length ? nextValue : currentValue;
+  }
+
+  const nextWords = nextValue.split(/\s+/u).length;
+  const currentWords = currentValue.split(/\s+/u).length;
+  if (nextWords !== currentWords) {
+    return nextWords > currentWords ? nextValue : currentValue;
+  }
+
+  if (nextValue.length !== currentValue.length) {
+    return nextValue.length > currentValue.length ? nextValue : currentValue;
+  }
+
+  return currentValue;
+}
+
 function rowToJob(row: JobRow): JobRecord {
   return {
     id: row.id,
@@ -533,6 +625,22 @@ function rowToCallback(row: CallbackRow): CallbackTaskRecord {
     dueAt: row.due_at ?? undefined,
     phoneNumber: row.phone_number ?? undefined,
     notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToCall(row: CallRow): CallRecord {
+  return {
+    id: row.id,
+    jobId: row.job_id ?? undefined,
+    staffId: row.staff_id ?? undefined,
+    callerPhone: row.caller_phone ?? undefined,
+    direction: row.direction,
+    status: row.status,
+    transcript: row.transcript ?? undefined,
+    summary: row.summary ?? undefined,
+    disposition: row.disposition ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -707,6 +815,14 @@ export class D1OnboardingRepository implements OnboardingRepository {
     const row = await this.db
       .prepare(`SELECT * FROM onboarding_invites WHERE id = ? LIMIT 1`)
       .bind(id)
+      .first<InviteRow>();
+    return row ? toInvite(row) : undefined;
+  }
+
+  async getLatestInviteByStaffId(staffId: string): Promise<InviteRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT * FROM onboarding_invites WHERE staff_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(staffId)
       .first<InviteRow>();
     return row ? toInvite(row) : undefined;
   }
@@ -1000,25 +1116,38 @@ export class D1OnboardingRepository implements OnboardingRepository {
     await this.db
       .prepare(
         `INSERT INTO staff_calendar_connections (
-          staff_id, provider, account_email, calendar_id, timezone, external_connection_id, connected_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          staff_id, provider, status, account_email, calendar_id, calendar_label, timezone,
+          auth_state, access_token, refresh_token, token_expires_at, last_error, connected_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id) DO UPDATE SET
           provider = excluded.provider,
+          status = excluded.status,
           account_email = excluded.account_email,
           calendar_id = excluded.calendar_id,
+          calendar_label = excluded.calendar_label,
           timezone = excluded.timezone,
-          external_connection_id = excluded.external_connection_id,
+          auth_state = excluded.auth_state,
+          access_token = excluded.access_token,
+          refresh_token = excluded.refresh_token,
+          token_expires_at = excluded.token_expires_at,
+          last_error = excluded.last_error,
           connected_at = excluded.connected_at,
           updated_at = excluded.updated_at`,
       )
       .bind(
         input.staffId,
         input.provider,
+        input.status,
         input.accountEmail ?? null,
         input.calendarId ?? null,
+        input.calendarLabel ?? null,
         input.timezone ?? null,
-        input.externalConnectionId ?? null,
-        input.connectedAt,
+        input.authState ?? null,
+        input.accessToken ?? null,
+        input.refreshToken ?? null,
+        input.tokenExpiresAt ?? null,
+        input.lastError ?? null,
+        input.connectedAt ?? null,
         input.updatedAt,
       )
       .run();
@@ -1032,12 +1161,42 @@ export class D1OnboardingRepository implements OnboardingRepository {
 
     return {
       provider: input.provider,
+      status: input.status,
       accountEmail: input.accountEmail,
       calendarId: input.calendarId,
+      calendarLabel: input.calendarLabel,
       timezone: input.timezone,
-      externalConnectionId: input.externalConnectionId,
+      authState: input.authState,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      tokenExpiresAt: input.tokenExpiresAt,
+      lastError: input.lastError,
       connectedAt: input.connectedAt,
+      updatedAt: input.updatedAt,
     };
+  }
+
+  async getStaffByCalendarAuthState(state: string): Promise<StaffRecord | undefined> {
+    const row = await this.db
+      .prepare(`SELECT staff_id FROM staff_calendar_connections WHERE auth_state = ? LIMIT 1`)
+      .bind(state)
+      .first<{ staff_id: string }>();
+    if (!row?.staff_id) {
+      return undefined;
+    }
+    return this.getStaff(row.staff_id);
+  }
+
+  async deleteStaffCalendarConnection(staffId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(`DELETE FROM staff_calendar_connections WHERE staff_id = ?`)
+      .bind(staffId)
+      .run();
+    await this.db
+      .prepare(`UPDATE onboarding_staff_profiles SET calendar_provider = NULL, updated_at = ? WHERE staff_id = ?`)
+      .bind(now, staffId)
+      .run();
   }
 
   async listJobs(staffId?: string): Promise<JobRecord[]> {
@@ -1058,14 +1217,146 @@ export class D1OnboardingRepository implements OnboardingRepository {
     }
     const job = rowToJob(jobRow);
     const staff = job.staffId ? await this.getStaffSummary(job.staffId) : undefined;
+    const customerId =
+      job.callerId ??
+      (await this.resolveCustomerId({
+        phoneNumber: job.callerPhone,
+        email: job.callerEmail,
+      }));
     const quotes = await this.listQuotes(job.id);
     const calls = job.calls;
     return {
       job,
       staff,
+      customer: customerId ? await this.getCustomerProfile(customerId) : undefined,
       quotes,
       photos: job.photos,
       calls,
+    };
+  }
+
+  async getCustomerProfile(customerId: string): Promise<CustomerProfile | undefined> {
+    const customerRow = await this.db
+      .prepare(`SELECT * FROM crm_customers WHERE id = ? LIMIT 1`)
+      .bind(customerId)
+      .first<CustomerRow>();
+    if (!customerRow) {
+      return undefined;
+    }
+
+    const normalizedPhone = customerRow.normalized_phone ?? undefined;
+    const normalizedEmail = customerRow.normalized_email ?? undefined;
+    const rawPhone = customerRow.phone_number ?? null;
+    const normalizedEmailParam = normalizedEmail ?? null;
+    const jobRows = await this.db
+      .prepare(
+        `SELECT * FROM crm_jobs
+         WHERE caller_id = ?
+            OR (? IS NOT NULL AND caller_phone = ?)
+            OR (? IS NOT NULL AND lower(caller_email) = ?)
+         ORDER BY updated_at DESC`,
+      )
+      .bind(customerId, rawPhone, rawPhone, normalizedEmailParam, normalizedEmailParam)
+      .all<JobRow>();
+    const jobs = (jobRows.results ?? []).map(rowToJob);
+    if (jobs.length === 0) {
+      return {
+        id: customerRow.id,
+        displayName: customerRow.display_name ?? undefined,
+        phoneNumber: customerRow.phone_number ?? undefined,
+        normalizedPhone,
+        email: customerRow.email ?? undefined,
+        normalizedEmail,
+        address: customerRow.address ?? undefined,
+        location: parseJson<JobLocation>(customerRow.location_json),
+        latestSummary: customerRow.latest_summary ?? undefined,
+        latestCallSummary: customerRow.latest_call_summary ?? undefined,
+        latestCallAt: customerRow.latest_call_at ?? undefined,
+        lastJobId: customerRow.last_job_id ?? undefined,
+        firstSeenAt: customerRow.first_seen_at,
+        lastSeenAt: customerRow.last_seen_at,
+        lastContactAt: customerRow.last_contact_at,
+        totalJobs: 0,
+        totalCalls: 0,
+        totalUploads: 0,
+        totalPhotos: 0,
+        knownStaffIds: [],
+        recentJobs: [],
+      };
+    }
+
+    const jobIds = jobs.map((job) => job.id);
+    const placeholders = jobIds.map(() => "?").join(", ");
+    const callRows =
+      jobIds.length > 0
+        ? await this.db
+            .prepare(
+              `SELECT * FROM crm_calls
+               WHERE job_id IN (${placeholders})
+                  OR (? IS NOT NULL AND caller_phone = ?)
+               ORDER BY updated_at DESC`,
+            )
+            .bind(...jobIds, rawPhone, rawPhone)
+            .all<CallRow>()
+        : { results: [] as CallRow[] };
+    const uploadRows =
+      jobIds.length > 0
+        ? await this.db
+            .prepare(
+              `SELECT * FROM crm_upload_requests
+               WHERE job_id IN (${placeholders})
+                  OR (? IS NOT NULL AND caller_phone = ?)
+               ORDER BY created_at DESC`,
+            )
+            .bind(...jobIds, rawPhone, rawPhone)
+            .all<UploadRequestRow>()
+        : { results: [] as UploadRequestRow[] };
+    const photoRows =
+      jobIds.length > 0
+        ? await this.db
+            .prepare(`SELECT * FROM crm_photo_assets WHERE job_id IN (${placeholders}) ORDER BY uploaded_at DESC`)
+            .bind(...jobIds)
+            .all<PhotoRow>()
+        : { results: [] as PhotoRow[] };
+
+    const calls: CallRecord[] = (callRows.results ?? []).map(rowToCall);
+    const uploads = (uploadRows.results ?? []).map((row) => row);
+    const photos = (photoRows.results ?? []).map(rowToPhoto);
+    const latestJob = jobs[0];
+    const latestCall = calls[0];
+    const knownStaffIds = [...new Set(jobs.map((job) => job.staffId).filter((value): value is string => Boolean(value)))];
+
+    return {
+      id: customerRow.id,
+      displayName: customerRow.display_name ?? latestJob?.callerName ?? undefined,
+      phoneNumber: customerRow.phone_number ?? latestJob?.callerPhone ?? undefined,
+      normalizedPhone,
+      email: customerRow.email ?? latestJob?.callerEmail ?? undefined,
+      normalizedEmail,
+      address: customerRow.address ?? latestJob?.address ?? undefined,
+      location: parseJson<JobLocation>(customerRow.location_json) ?? latestJob?.location,
+      latestSummary: customerRow.latest_summary ?? latestJob?.summary ?? latestJob?.issue ?? undefined,
+      latestCallSummary: customerRow.latest_call_summary ?? latestCall?.summary ?? undefined,
+      latestCallAt: customerRow.latest_call_at ?? latestCall?.updatedAt ?? undefined,
+      lastJobId: customerRow.last_job_id ?? latestJob?.id ?? undefined,
+      firstSeenAt: customerRow.first_seen_at,
+      lastSeenAt: customerRow.last_seen_at,
+      lastContactAt: customerRow.last_contact_at,
+      totalJobs: jobs.length,
+      totalCalls: calls.length,
+      totalUploads: uploads.length,
+      totalPhotos: photos.length,
+      knownStaffIds,
+      recentJobs: jobs.slice(0, 5).map((job) => ({
+        jobId: job.id,
+        staffId: job.staffId,
+        status: job.status,
+        summary: job.summary ?? job.issue,
+        suburb: toCustomerSuburb(job.location, job.address),
+        quotedPrice: job.quote?.amount,
+        photoCount: job.photos.length,
+        updatedAt: job.updatedAt,
+      })),
     };
   }
 
@@ -1095,13 +1386,22 @@ export class D1OnboardingRepository implements OnboardingRepository {
       .bind(input.id)
       .first<JobRow>();
     const now = new Date().toISOString();
+    const callerPhone = input.callerPhone ?? existing?.caller_phone ?? undefined;
+    const callerEmail = input.callerEmail ?? existing?.caller_email ?? undefined;
+    const callerId =
+      (await this.resolveCustomerId({
+        preferredId: input.callerId ?? existing?.caller_id ?? undefined,
+        phoneNumber: callerPhone,
+        email: callerEmail,
+      })) ??
+      undefined;
     const record: JobRecord = {
       id: input.id,
       staffId: input.staffId ?? existing?.staff_id ?? undefined,
-      callerId: input.callerId ?? existing?.caller_id ?? undefined,
+      callerId,
       callerName: input.callerName ?? existing?.caller_name ?? undefined,
-      callerPhone: input.callerPhone ?? existing?.caller_phone ?? undefined,
-      callerEmail: input.callerEmail ?? existing?.caller_email ?? undefined,
+      callerPhone,
+      callerEmail,
       address: input.address ?? existing?.address ?? undefined,
       location: input.location ? { ...input.location } : parseJson<JobLocation>(existing?.location_json),
       issue: input.issue ?? existing?.issue ?? undefined,
@@ -1165,6 +1465,8 @@ export class D1OnboardingRepository implements OnboardingRepository {
         record.updatedAt,
       )
       .run();
+
+    await this.touchCustomerFromJob(record);
 
     return record;
   }
@@ -1429,6 +1731,8 @@ export class D1OnboardingRepository implements OnboardingRepository {
       });
     }
 
+    await this.touchCustomerFromCall(record);
+
     return record;
   }
 
@@ -1546,17 +1850,6 @@ export class D1OnboardingRepository implements OnboardingRepository {
       return undefined;
     }
     const nextFileCount = request.fileCount + photos.length;
-    const updateResult = await this.db
-      .prepare(
-        `UPDATE crm_upload_requests
-         SET status = ?, completed_at = ?, file_count = ?
-         WHERE token = ? AND status = ? AND expires_at > ?`,
-      )
-      .bind("completed", now, nextFileCount, row.token, "pending", now)
-      .run();
-    if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
-      return undefined;
-    }
     for (const photo of photos) {
       await this.db
         .prepare(
@@ -1575,14 +1868,6 @@ export class D1OnboardingRepository implements OnboardingRepository {
         )
         .run();
     }
-    const updatedRequest: UploadRequestRecord = {
-      ...request,
-      status: "completed",
-      completedAt: now,
-      fileCount: nextFileCount,
-      files: [...request.files, ...photos],
-    };
-
     const job = await this.getJobById(request.jobId);
     if (job) {
       const nextPhotos = [...job.photos, ...photos];
@@ -1592,6 +1877,25 @@ export class D1OnboardingRepository implements OnboardingRepository {
         updatedAt: now,
       });
     }
+
+    const updateResult = await this.db
+      .prepare(
+        `UPDATE crm_upload_requests
+         SET status = ?, completed_at = ?, file_count = ?
+         WHERE token = ? AND status = ? AND expires_at > ?`,
+      )
+      .bind("completed", now, nextFileCount, row.token, "pending", now)
+      .run();
+    if (!updateResult.success || (updateResult.meta?.changes ?? 0) === 0) {
+      return undefined;
+    }
+    const updatedRequest: UploadRequestRecord = {
+      ...request,
+      status: "completed",
+      completedAt: now,
+      fileCount: nextFileCount,
+      files: [...request.files, ...photos],
+    };
 
     return updatedRequest;
   }
@@ -1789,11 +2093,18 @@ export class D1OnboardingRepository implements OnboardingRepository {
     const calendarConnection = calendarRow
       ? {
           provider: calendarRow.provider,
+          status: calendarRow.status,
           accountEmail: calendarRow.account_email ?? undefined,
           calendarId: calendarRow.calendar_id ?? undefined,
+          calendarLabel: calendarRow.calendar_label ?? undefined,
           timezone: calendarRow.timezone ?? undefined,
-          externalConnectionId: calendarRow.external_connection_id ?? undefined,
-          connectedAt: calendarRow.connected_at,
+          authState: calendarRow.auth_state ?? undefined,
+          accessToken: calendarRow.access_token ?? undefined,
+          refreshToken: calendarRow.refresh_token ?? undefined,
+          tokenExpiresAt: calendarRow.token_expires_at ?? undefined,
+          lastError: calendarRow.last_error ?? undefined,
+          connectedAt: calendarRow.connected_at ?? undefined,
+          updatedAt: calendarRow.updated_at,
         }
       : undefined;
 
@@ -1813,6 +2124,171 @@ export class D1OnboardingRepository implements OnboardingRepository {
       createdAt: authRow?.created_at ?? profileRow.created_at ?? profileRow.updated_at,
       updatedAt: profileRow.updated_at,
     };
+  }
+
+  private async resolveCustomerId(input: {
+    preferredId?: string;
+    phoneNumber?: string;
+    email?: string;
+  }): Promise<string | undefined> {
+    if (input.preferredId) {
+      return input.preferredId;
+    }
+
+    const normalizedPhone = normalizePhoneNumber(input.phoneNumber);
+    if (normalizedPhone) {
+      const byPhone = await this.db
+        .prepare(`SELECT id FROM crm_customers WHERE normalized_phone = ? LIMIT 1`)
+        .bind(normalizedPhone)
+        .first<{ id: string }>();
+      if (byPhone?.id) {
+        return byPhone.id;
+      }
+    }
+
+    const normalizedEmail = normalizeEmail(input.email);
+    if (normalizedEmail) {
+      const byEmail = await this.db
+        .prepare(`SELECT id FROM crm_customers WHERE normalized_email = ? LIMIT 1`)
+        .bind(normalizedEmail)
+        .first<{ id: string }>();
+      if (byEmail?.id) {
+        return byEmail.id;
+      }
+    }
+
+    if (normalizedPhone || normalizedEmail) {
+      return globalThis.crypto.randomUUID();
+    }
+
+    return undefined;
+  }
+
+  private async touchCustomerFromJob(job: JobRecord): Promise<void> {
+    const customerId =
+      job.callerId ??
+      (await this.resolveCustomerId({
+        phoneNumber: job.callerPhone,
+        email: job.callerEmail,
+      }));
+    if (!customerId) {
+      return;
+    }
+
+    const existing = await this.db
+      .prepare(`SELECT * FROM crm_customers WHERE id = ? LIMIT 1`)
+      .bind(customerId)
+      .first<CustomerRow>();
+    const normalizedPhone = normalizePhoneNumber(job.callerPhone) ?? existing?.normalized_phone ?? undefined;
+    const normalizedEmail = normalizeEmail(job.callerEmail) ?? existing?.normalized_email ?? undefined;
+    const now = job.updatedAt;
+
+    await this.db
+      .prepare(
+        `INSERT INTO crm_customers (
+          id, display_name, phone_number, normalized_phone, email, normalized_email, address, location_json,
+          latest_summary, latest_call_summary, latest_call_at, last_job_id, first_seen_at, last_seen_at,
+          last_contact_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          display_name = COALESCE(excluded.display_name, crm_customers.display_name),
+          phone_number = COALESCE(excluded.phone_number, crm_customers.phone_number),
+          normalized_phone = COALESCE(excluded.normalized_phone, crm_customers.normalized_phone),
+          email = COALESCE(excluded.email, crm_customers.email),
+          normalized_email = COALESCE(excluded.normalized_email, crm_customers.normalized_email),
+          address = COALESCE(excluded.address, crm_customers.address),
+          location_json = COALESCE(excluded.location_json, crm_customers.location_json),
+          latest_summary = COALESCE(excluded.latest_summary, crm_customers.latest_summary),
+          last_job_id = COALESCE(excluded.last_job_id, crm_customers.last_job_id),
+          last_seen_at = excluded.last_seen_at,
+          last_contact_at = excluded.last_contact_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        customerId,
+        choosePreferredDisplayName(job.callerName, existing?.display_name) ?? null,
+        job.callerPhone ?? existing?.phone_number ?? null,
+        normalizedPhone ?? null,
+        job.callerEmail ?? existing?.email ?? null,
+        normalizedEmail ?? null,
+        job.address ?? existing?.address ?? null,
+        serializeLocation(job.location) ?? existing?.location_json ?? null,
+        job.summary ?? job.issue ?? existing?.latest_summary ?? null,
+        existing?.latest_call_summary ?? null,
+        existing?.latest_call_at ?? null,
+        job.id,
+        existing?.first_seen_at ?? job.createdAt,
+        now,
+        now,
+        existing?.created_at ?? job.createdAt,
+        now,
+      )
+      .run();
+  }
+
+  private async touchCustomerFromCall(call: CallRecord): Promise<void> {
+    const job = call.jobId ? await this.getJobById(call.jobId) : undefined;
+    const customerId =
+      job?.callerId ??
+      (await this.resolveCustomerId({
+        phoneNumber: call.callerPhone ?? job?.callerPhone,
+        email: job?.callerEmail,
+      }));
+    if (!customerId) {
+      return;
+    }
+
+    const existing = await this.db
+      .prepare(`SELECT * FROM crm_customers WHERE id = ? LIMIT 1`)
+      .bind(customerId)
+      .first<CustomerRow>();
+    const normalizedPhone = normalizePhoneNumber(call.callerPhone ?? job?.callerPhone) ?? existing?.normalized_phone ?? undefined;
+    const normalizedEmail = normalizeEmail(job?.callerEmail) ?? existing?.normalized_email ?? undefined;
+    const now = call.updatedAt;
+
+    await this.db
+      .prepare(
+        `INSERT INTO crm_customers (
+          id, display_name, phone_number, normalized_phone, email, normalized_email, address, location_json,
+          latest_summary, latest_call_summary, latest_call_at, last_job_id, first_seen_at, last_seen_at,
+          last_contact_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          display_name = COALESCE(excluded.display_name, crm_customers.display_name),
+          phone_number = COALESCE(excluded.phone_number, crm_customers.phone_number),
+          normalized_phone = COALESCE(excluded.normalized_phone, crm_customers.normalized_phone),
+          email = COALESCE(excluded.email, crm_customers.email),
+          normalized_email = COALESCE(excluded.normalized_email, crm_customers.normalized_email),
+          address = COALESCE(excluded.address, crm_customers.address),
+          location_json = COALESCE(excluded.location_json, crm_customers.location_json),
+          latest_summary = COALESCE(excluded.latest_summary, crm_customers.latest_summary),
+          latest_call_summary = COALESCE(excluded.latest_call_summary, crm_customers.latest_call_summary),
+          latest_call_at = COALESCE(excluded.latest_call_at, crm_customers.latest_call_at),
+          last_job_id = COALESCE(excluded.last_job_id, crm_customers.last_job_id),
+          last_seen_at = excluded.last_seen_at,
+          last_contact_at = excluded.last_contact_at,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        customerId,
+        choosePreferredDisplayName(job?.callerName, existing?.display_name) ?? null,
+        call.callerPhone ?? job?.callerPhone ?? existing?.phone_number ?? null,
+        normalizedPhone ?? null,
+        job?.callerEmail ?? existing?.email ?? null,
+        normalizedEmail ?? null,
+        job?.address ?? existing?.address ?? null,
+        serializeLocation(job?.location) ?? existing?.location_json ?? null,
+        job?.summary ?? job?.issue ?? existing?.latest_summary ?? null,
+        call.summary ?? existing?.latest_call_summary ?? null,
+        call.updatedAt,
+        job?.id ?? existing?.last_job_id ?? null,
+        existing?.first_seen_at ?? call.createdAt,
+        now,
+        now,
+        existing?.created_at ?? call.createdAt,
+        now,
+      )
+      .run();
   }
 
   private async writeJob(job: JobRecord): Promise<void> {
@@ -1865,5 +2341,7 @@ export class D1OnboardingRepository implements OnboardingRepository {
         job.updatedAt,
       )
       .run();
+
+    await this.touchCustomerFromJob(job);
   }
 }

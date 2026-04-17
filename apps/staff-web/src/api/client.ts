@@ -1,4 +1,4 @@
-import type { JobCard, JobSummary, PricingProfile, StaffProfile, StaffSession } from '../types';
+import type { JobCard, JobSummary, PricingProfile, StaffProfile } from '../types';
 import { resolveApiBaseUrl } from './baseUrl';
 
 const API_BASE_URL = resolveApiBaseUrl();
@@ -13,19 +13,15 @@ export class ApiError extends Error {
   }
 }
 
-function createHeaders(initHeaders?: HeadersInit, sessionToken?: string): Headers {
-  const headers = new Headers(initHeaders ?? {});
-  if (sessionToken) {
-    headers.set('Authorization', `Bearer ${sessionToken}`);
-  }
-  return headers;
+function createHeaders(initHeaders?: HeadersInit): Headers {
+  return new Headers(initHeaders ?? {});
 }
 
-async function requestJson<T>(path: string, init?: RequestInit, sessionToken?: string): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: 'include',
-    headers: createHeaders(init?.headers, sessionToken),
+    headers: createHeaders(init?.headers),
   });
 
   const responseText = await response.text().catch(() => '');
@@ -49,10 +45,9 @@ async function requestJson<T>(path: string, init?: RequestInit, sessionToken?: s
   return (responseText ? JSON.parse(responseText) : null) as T;
 }
 
-export async function fetchProtectedAsset(photoId: string, sessionToken?: string): Promise<Blob> {
+export async function fetchProtectedAsset(photoId: string): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}/assets/photos/${encodeURIComponent(photoId)}`, {
     credentials: 'include',
-    headers: createHeaders(undefined, sessionToken),
   });
 
   if (!response.ok) {
@@ -65,8 +60,7 @@ export async function fetchProtectedAsset(photoId: string, sessionToken?: string
 export async function verifyStaffOtp(input: {
   inviteToken: string;
   otpCode: string;
-  staffId?: string;
-}): Promise<{ staff: StaffProfile; session: StaffSession }> {
+}): Promise<StaffProfile> {
   const payload = await requestJson<{
     staff: StaffProfile;
     session: { expiresAt: string };
@@ -78,31 +72,25 @@ export async function verifyStaffOtp(input: {
     body: JSON.stringify(input),
   });
 
-  return {
-    staff: payload.staff,
-    session: {
-      expiresAt: payload.session.expiresAt,
-      staffId: payload.staff.id,
-    },
-  };
-}
-
-export async function getStaffProfile(sessionToken?: string): Promise<StaffProfile> {
-  const payload = await requestJson<{ staff: StaffProfile }>('/staff/me', undefined, sessionToken);
   return payload.staff;
 }
 
-export async function getStaffJobs(sessionToken?: string): Promise<JobSummary[]> {
-  const payload = await requestJson<{ jobs: JobSummary[] }>('/jobs', undefined, sessionToken);
+export async function getStaffProfile(): Promise<StaffProfile> {
+  const payload = await requestJson<{ staff: StaffProfile }>('/staff/me');
+  return payload.staff;
+}
+
+export async function getStaffJobs(signal?: AbortSignal): Promise<JobSummary[]> {
+  const payload = await requestJson<{ jobs: JobSummary[] }>('/jobs', { signal });
   return payload.jobs;
 }
 
-export async function getJobCard(sessionToken: string | undefined, jobId: string): Promise<JobCard> {
-  const payload = await requestJson<{ card: JobCard }>(`/jobs/${encodeURIComponent(jobId)}/card`, undefined, sessionToken);
+export async function getJobCard(jobId: string, signal?: AbortSignal): Promise<JobCard> {
+  const payload = await requestJson<{ card: JobCard }>(`/jobs/${encodeURIComponent(jobId)}/card`, { signal });
   return payload.card;
 }
 
-export async function saveVoiceConsent(sessionToken: string | undefined, input: {
+export async function saveVoiceConsent(input: {
   staffId: string;
   consent: boolean;
   signedBy?: string;
@@ -116,13 +104,12 @@ export async function saveVoiceConsent(sessionToken: string | undefined, input: 
       ...input,
       capturedAt: new Date().toISOString(),
     }),
-  }, sessionToken);
+  });
 
   return payload.staff;
 }
 
 export async function savePricingInterview(
-  sessionToken: string | undefined,
   input: {
     staffId: string;
     responses: PricingProfile;
@@ -134,31 +121,27 @@ export async function savePricingInterview(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
-  }, sessionToken);
+  });
 
   return payload;
 }
 
-export async function connectCalendar(
-  sessionToken: string | undefined,
-  input: {
-    staffId: string;
-    accountEmail?: string;
-    calendarId?: string;
-    timezone?: string;
-    externalConnectionId?: string;
-  },
-): Promise<StaffProfile> {
-  const payload = await requestJson<{ staff: StaffProfile }>('/staff/calendar/connect', {
+export async function launchStaffSetup(): Promise<{ launchUrl: string }> {
+  return requestJson<{ ok: true; launchUrl: string; setup: unknown }>('/staff/setup/launch', {
+    method: 'POST',
+  });
+}
+
+export async function disconnectCalendar(staffId: string): Promise<StaffProfile> {
+  const payload = await requestJson<{ staff: StaffProfile }>('/staff/calendar/disconnect', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      provider: 'outlook',
-      ...input,
+      staffId,
     }),
-  }, sessionToken);
+  });
 
   return payload.staff;
 }

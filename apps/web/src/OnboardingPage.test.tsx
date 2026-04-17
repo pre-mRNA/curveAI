@@ -23,7 +23,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function matchesApiPath(pathname: string, path: string) {
-  return pathname === path || pathname === `/api${path}`;
+  return pathname === path;
 }
 
 function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
@@ -117,9 +117,11 @@ function backendSession(overrides: Partial<Record<string, unknown>> = {}) {
 describe('onboarding route', () => {
   const fetchMock = vi.fn();
   let savedReviewPayload: Record<string, unknown> | null = null;
+  let startSessionFixture: ReturnType<typeof backendSession>;
 
   beforeEach(() => {
     savedReviewPayload = null;
+    startSessionFixture = backendSession();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -128,12 +130,12 @@ describe('onboarding route', () => {
       const method = init?.method ?? 'GET';
 
       if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
-        return jsonResponse({ error: 'No resumable session' }, 401);
+        return jsonResponse({ error: { message: 'No resumable session' } }, 401);
       }
 
       if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
         return jsonResponse({
-          session: backendSession(),
+          session: startSessionFixture,
         });
       }
 
@@ -242,22 +244,27 @@ describe('onboarding route', () => {
 
     renderRoute('/onboard/invite-123');
 
-    expect(await screen.findByRole('heading', { name: /structured voice onboarding for tradies/i })).toBeInTheDocument();
-    expect(screen.getByText('invite-123', { selector: 'code' })).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.getByRole('heading', { name: /set up your assistant/i })).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+    expect(screen.getByText(/private setup link/i)).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText(/i consent to recording/i));
-    await user.click(screen.getByLabelText(/i consent to using a clean voice sample/i));
-    await user.click(screen.getByLabelText(/i consent to using my onboarding responses/i));
-    await user.click(screen.getByRole('button', { name: /begin interview/i }));
+    await user.click(screen.getByLabelText(/yes, you can record this setup so we do not miss anything/i));
+    await user.click(screen.getByLabelText(/yes, you can use my voice sample so the assistant sounds like me/i));
+    await user.click(screen.getByLabelText(/yes, you can use my answers to set up my jobs, prices, and rules/i));
+    await user.click(screen.getByRole('button', { name: /start setup/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /answer the structured interview/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /answer a few questions/i })).toBeInTheDocument();
     });
 
     expect(screen.getByText(/what work do you want the agent to handle/i)).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText(/your response/i), 'Handle emergency plumbing, daytime bookings, and quote follow-ups.');
-    await user.click(screen.getByRole('button', { name: /save response/i }));
+    await user.type(screen.getByLabelText(/your answer/i), 'Handle emergency plumbing, daytime bookings, and quote follow-ups.');
+    await user.click(screen.getByRole('button', { name: /save answer/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -266,27 +273,27 @@ describe('onboarding route', () => {
       );
     });
 
-    await user.click(screen.getByRole('button', { name: /open extraction review/i }));
+    await user.click(screen.getByRole('button', { name: /check details/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /review the extracted profile/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /make sure these details look right/i })).toBeInTheDocument();
     });
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('ServiceM8')).toBeInTheDocument();
     });
 
-    await user.clear(screen.getByLabelText(/staff name/i));
-    await user.type(screen.getByLabelText(/staff name/i), 'Jordan S');
-    await user.clear(screen.getByLabelText(/company name/i));
-    await user.type(screen.getByLabelText(/company name/i), 'Jordan Plumbing Co');
-    await user.clear(screen.getByLabelText(/^role$/i));
-    await user.type(screen.getByLabelText(/^role$/i), 'Dispatcher');
+    await user.clear(screen.getByLabelText(/your name/i));
+    await user.type(screen.getByLabelText(/your name/i), 'Jordan S');
+    await user.clear(screen.getByLabelText(/business name/i));
+    await user.type(screen.getByLabelText(/business name/i), 'Jordan Plumbing Co');
+    await user.clear(screen.getByLabelText(/your role/i));
+    await user.type(screen.getByLabelText(/your role/i), 'Dispatcher');
 
-    await user.click(screen.getByRole('button', { name: /save review and continue/i }));
+    await user.click(screen.getByRole('button', { name: /save anyway and keep going/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /connect the staff calendar/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /connect your calendar/i })).toBeInTheDocument();
     });
 
     expect(savedReviewPayload).toMatchObject({
@@ -298,15 +305,116 @@ describe('onboarding route', () => {
       },
     });
 
-    await user.click(screen.getByRole('button', { name: /connect microsoft calendar/i }));
+    await user.click(screen.getByRole('button', { name: /connect microsoft/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: /open microsoft connection link/i })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: /open microsoft again/i })).toHaveAttribute(
         'href',
         'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?mock=1',
       );
     });
   }, 10000);
+
+  it('shows an honest unavailable state when Microsoft calendar is not configured for this environment', async () => {
+    startSessionFixture = backendSession({
+      status: 'calendar',
+      calendar: {
+        provider: 'microsoft',
+        mode: 'mock',
+        status: 'error',
+        lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+      },
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
+      const method = init?.method ?? 'GET';
+
+      if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
+        return jsonResponse({ error: { message: 'No resumable session' } }, 401);
+      }
+
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/start') && method === 'POST') {
+        return jsonResponse({
+          session: startSessionFixture,
+        });
+      }
+
+      if (matchesApiPath(url.pathname, '/onboarding/sessions/sess_1/calendar/microsoft/start') && method === 'GET') {
+        return jsonResponse({
+          calendar: {
+            provider: 'microsoft',
+            mode: 'mock',
+            status: 'error',
+            lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+          },
+          session: backendSession({
+            status: 'calendar',
+            calendar: {
+              provider: 'microsoft',
+              mode: 'mock',
+              status: 'error',
+              lastError: 'Microsoft calendar is not configured for this staging environment yet.',
+            },
+          }),
+        });
+      }
+
+      return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
+    });
+
+    const user = userEvent.setup();
+    renderRoute('/onboard/invite-123');
+
+    expect(await screen.findByRole('heading', { name: /set up your assistant/i })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/yes, you can record this setup so we do not miss anything/i));
+    await user.click(screen.getByLabelText(/yes, you can use my voice sample so the assistant sounds like me/i));
+    await user.click(screen.getByLabelText(/yes, you can use my answers to set up my jobs, prices, and rules/i));
+    await user.click(screen.getByRole('button', { name: /start setup/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /connect your calendar/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/this environment does not have live microsoft calendar turned on yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/microsoft calendar is not configured for this staging environment yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/unavailable here/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /try microsoft again/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/calendar\/microsoft\/start$/),
+        expect.objectContaining({ credentials: 'include' }),
+      );
+    });
+  });
+
+  it('requests the first interview question when the started session does not include one', async () => {
+    startSessionFixture = backendSession({
+      nextQuestion: undefined,
+    });
+    const user = userEvent.setup();
+
+    renderRoute('/onboard/invite-123');
+
+    expect(await screen.findByRole('heading', { name: /set up your assistant/i })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/yes, you can record this setup so we do not miss anything/i));
+    await user.click(screen.getByLabelText(/yes, you can use my voice sample so the assistant sounds like me/i));
+    await user.click(screen.getByLabelText(/yes, you can use my answers to set up my jobs, prices, and rules/i));
+    await user.click(screen.getByRole('button', { name: /start setup/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/onboarding\/sessions\/sess_1\/next-question$/),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    expect(await screen.findByText(/do you prefer fixed price or callout pricing/i)).toBeInTheDocument();
+  });
 
   it('uploads a recorded voice sample with the real elapsed duration', async () => {
     const user = userEvent.setup();
@@ -470,18 +578,18 @@ describe('onboarding route', () => {
     renderRoute('/onboard/invite-123');
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /capture a clean sample for cloning/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /record a short voice sample/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /start recording/i }));
+    await user.click(screen.getByRole('button', { name: /^start$/i }));
     now = 96_000;
-    await user.click(screen.getByRole('button', { name: /stop recording/i }));
+    await user.click(screen.getByRole('button', { name: /^stop$/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/sample captured/i)).toBeInTheDocument();
+      expect(screen.getByText(/voice saved/i)).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /upload sample/i }));
+    await user.click(screen.getByRole('button', { name: /upload voice/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -494,7 +602,37 @@ describe('onboarding route', () => {
     expect(uploadedFilename).toBe('voice-sample.webm');
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /lock the onboarding profile/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /finish setup/i })).toBeInTheDocument();
     });
+  });
+
+  it('shows the finished state when the invite already has a completed setup session', async () => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, 'http://localhost');
+      const method = init?.method ?? 'GET';
+
+      if (matchesApiPath(url.pathname, '/onboarding/invites/invite-123/session') && method === 'GET') {
+        return jsonResponse({
+          session: backendSession({
+            status: 'completed',
+            calendar: {
+              provider: 'microsoft',
+              status: 'connected',
+            },
+            voiceSample: {
+              id: 'sample_1',
+            },
+          }),
+        });
+      }
+
+      return jsonResponse({ error: `Unhandled request: ${method} ${url.pathname}` }, 404);
+    });
+
+    renderRoute('/onboard/invite-123');
+
+    expect(await screen.findByRole('heading', { name: /setup complete\./i })).toBeInTheDocument();
+    expect(screen.getByText(/your details are saved and ready to use\./i)).toBeInTheDocument();
   });
 });

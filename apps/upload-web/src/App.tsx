@@ -1,41 +1,83 @@
-import { ChangeEvent, useEffect, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { ApiError, getUploadRequest, uploadPhotos, type UploadRequestSummary } from './api/client';
-import { PHOTO_UPLOAD_ACCEPT, isSupportedPhotoFile } from './lib/upload';
+import { Suspense, lazy, useEffect } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 
-function maskToken(value: string) {
-  if (value.length <= 12) {
-    return value;
-  }
-  return `${value.slice(0, 6)}…${value.slice(-4)}`;
-}
+import { scheduleBrowserWarmup } from '../../../packages/shared/src/browserWarmup';
+import { uploadBrand, uploadBrandStyle } from './brand';
+
+const loadUploadPage = () => import('./UploadPage');
+const UploadPage = lazy(loadUploadPage);
 
 function UploadLanding() {
+  useEffect(() => {
+    const cleanup = scheduleBrowserWarmup(() => {
+      void loadUploadPage();
+    });
+
+    return cleanup;
+  }, []);
+
   return (
-    <div className="shell">
+    <div className="shell" style={uploadBrandStyle}>
       <div className="container">
         <header className="hero hero--upload">
           <div className="hero-copy">
-            <div className="eyebrow">Customer Upload</div>
-            <h1>Send your job photos to the tradie.</h1>
-            <p>
-              Use the secure upload link from SMS to add site photos, damaged parts, or other job details from your
-              phone.
-            </p>
+            <div className="eyebrow">{uploadBrand.eyebrow}</div>
+            <h1>{uploadBrand.heroTitle}</h1>
+            <p>{uploadBrand.heroDescription}</p>
+            <div className="meta-row">
+              <span className="pill accent">Under 2 minutes</span>
+              <span className="pill">Private text link</span>
+              <span className="pill">Phone friendly</span>
+            </div>
+            <div className="hero-callout">
+              Open the text from your tradie or office, tap the link, and send the photos from your phone.
+            </div>
           </div>
-          <div className="hero-card">
-            <span className="pill accent">Mobile first</span>
-            <strong>Fast image upload</strong>
-            <p className="muted">The upload form is tuned for one-handed use, large tap targets, and multiple images.</p>
+          <div className="hero-card hero-card--practical">
+            <div className="section-label">What to send</div>
+            <strong>Start wide, then show the problem close up.</strong>
+            <ul className="tip-list compact">
+              <li>Show the whole area first.</li>
+              <li>Then show the leak, damage, label, or blocked part.</li>
+              <li>Send a few photos together if you can.</li>
+            </ul>
           </div>
         </header>
 
-        <div className="card">
-          <div className="card-inner">
-            <h2>Open the tokenized upload path</h2>
-            <p className="muted">
-              The live upload experience runs at <code>/upload/:token</code>. Root access is only a landing page.
-            </p>
+        <div className="upload-landing-grid">
+          <div className="card card--primary">
+            <div className="card-inner">
+              <div className="section-label">How it works</div>
+              <h2>Open the link from the text and send the photos.</h2>
+              <p className="muted">The link only works for the job in that message, so it is safe to send the photos there.</p>
+              <div className="landing-guide-list">
+                <div className="landing-guide-item">
+                  <strong>1. Open the text on your phone</strong>
+                  <p className="muted">Tap the link from the tradie or office to open the photo page.</p>
+                </div>
+                <div className="landing-guide-item">
+                  <strong>2. Add a few clear photos</strong>
+                  <p className="muted">Take one wide photo, then close-ups of the problem.</p>
+                </div>
+                <div className="landing-guide-item">
+                  <strong>3. Send them all together</strong>
+                  <p className="muted">The tradie gets the photos straight away.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-inner">
+              <div className="section-label">Before you start</div>
+              <h2>Why this helps</h2>
+              <ul className="tip-list">
+                <li>The page shows who asked for the photos and what job they are for.</li>
+                <li>Good photos can help the tradie quote the job before they arrive.</li>
+                <li>They can also help the tradie bring the right parts the first time.</li>
+              </ul>
+              <p className="muted">A few clear photos now usually saves time later.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -43,231 +85,30 @@ function UploadLanding() {
   );
 }
 
-function UploadPage() {
-  const { token = '' } = useParams();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [uploadRequest, setUploadRequest] = useState<UploadRequestSummary | null>(null);
-  const [loadingRequest, setLoadingRequest] = useState(true);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const uploadButtonLabel = selectedFiles.length === 1 ? 'Upload 1 photo' : 'Upload photos';
-  const uploadBlocked =
-    loadingRequest ||
-    error === 'This upload link has expired.' ||
-    error === 'Missing upload token.' ||
-    error === 'Unable to load upload request' ||
-    Boolean(error?.startsWith('Upload request failed'));
-
-  useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      setLoadingRequest(true);
-      setError(null);
-
-      try {
-        const nextRequest = await getUploadRequest(token);
-        if (!active) {
-          return;
-        }
-        setUploadRequest(nextRequest);
-      } catch (requestError) {
-        if (!active) {
-          return;
-        }
-        if (requestError instanceof ApiError && requestError.status === 410) {
-          setError('This upload link has expired.');
-          return;
-        }
-        setError(requestError instanceof TypeError ? 'Unable to load upload request.' : 'Unable to load upload request');
-      } finally {
-        if (active) {
-          setLoadingRequest(false);
-        }
-      }
-    };
-
-    if (!token) {
-      setLoadingRequest(false);
-      setError('Missing upload token.');
-      return () => {
-        active = false;
-      };
-    }
-
-    void load();
-
-    return () => {
-      active = false;
-    };
-  }, [token]);
-
-  const clearSelection = () => {
-    setSelectedFiles([]);
-    setMessage(null);
-    if (error === 'Only image files are accepted.' || error === 'Choose at least one image.') {
-      setError(null);
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const onSelect = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextFiles = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
-    setMessage(null);
-    setError(null);
-
-    if (nextFiles.some((file) => !isSupportedPhotoFile(file))) {
-      clearSelection();
-      setError('Only image files are accepted.');
-      return;
-    }
-
-    setSelectedFiles(nextFiles);
-    event.currentTarget.value = '';
-  };
-
-  const onUpload = async () => {
-    if (!selectedFiles.length) {
-      setError('Choose at least one image.');
-      return;
-    }
-
-    if (selectedFiles.some((file) => !isSupportedPhotoFile(file))) {
-      setError('Only image files are accepted.');
-      return;
-    }
-
-    setUploading(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const result = await uploadPhotos(token, selectedFiles);
-      setMessage(`Uploaded ${result.uploaded} photo${result.uploaded === 1 ? '' : 's'} successfully.`);
-      setUploadRequest((current) =>
-        current
-          ? {
-              ...current,
-              fileCount: current.fileCount + result.uploaded,
-            }
-          : current,
-      );
-      setSelectedFiles([]);
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    } catch (uploadError) {
-      setError(uploadError instanceof TypeError ? 'Upload failed. Check the connection and try again.' : uploadError instanceof Error ? uploadError.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
-
+function RouteFallback() {
   return (
-    <div className="upload-wrap">
+    <div className="upload-wrap" style={uploadBrandStyle}>
       <div className="container">
-        <div className="card upload-card">
-          <div className="card-inner">
-            <div className="eyebrow">Customer Upload</div>
-            <h1>Send your photos to the tradie.</h1>
-            <div className="meta-row">
-              <span className="pill accent">Secure link <code>{token ? maskToken(token) : 'missing'}</code></span>
-              {uploadRequest ? <span className="pill">{uploadRequest.fileCount} already uploaded</span> : null}
+          <div className="card upload-card">
+            <div className="card-inner">
+              <div className="eyebrow">Loading</div>
+            <h1>Opening your photo link.</h1>
+            <p className="muted">Getting the upload page ready.</p>
             </div>
-
-            <div className="upload-panel">
-              <div className="upload-panel-copy">
-                <strong>Upload images from the job site</strong>
-                <div className="muted">
-                  {loadingRequest
-                    ? 'Checking the upload link and loading job details.'
-                    : 'PNG, JPG, JPEG, HEIC, HEIF, or WebP images only.'}
-                </div>
-                {!loadingRequest ? <div className="muted">Select multiple files at once, then tap upload when you are ready.</div> : null}
-              </div>
-
-              <label className="field" htmlFor="upload-files">
-                <span>Photo files</span>
-                <input
-                  ref={fileInputRef}
-                  id="upload-files"
-                  className="text-input"
-                  type="file"
-                  accept={PHOTO_UPLOAD_ACCEPT}
-                  multiple
-                  onChange={onSelect}
-                  disabled={uploadBlocked}
-                />
-              </label>
-
-              <div className="meta-row">
-                <button
-                  className="button"
-                  type="button"
-                  onClick={onUpload}
-                  disabled={uploadBlocked || uploading || !selectedFiles.length}
-                >
-                  {uploading ? 'Uploading...' : uploadButtonLabel}
-                </button>
-                <button
-                  className="button secondary"
-                  type="button"
-                  onClick={clearSelection}
-                  disabled={loadingRequest || uploading || !selectedFiles.length}
-                >
-                  Clear selection
-                </button>
-              </div>
-            </div>
-
-            <div className="selection-summary" aria-live="polite">
-              <div className="selection-summary-head">
-                <h2>Selected files</h2>
-                <span className="pill">{selectedFiles.length} selected</span>
-              </div>
-
-              <div className="selection-list">
-                {selectedFiles.length ? (
-                  selectedFiles.map((file) => (
-                    <div className="selection-item" key={`${file.name}-${file.size}-${file.lastModified}`}>
-                      <strong>{file.name}</strong>
-                      <span className="muted">{file.type || 'unknown type'}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="empty-state">
-                    <strong>No files selected yet.</strong>
-                    <p className="muted">Choose one or more images to queue them for upload.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="upload-feedback" aria-live="polite">
-              {message ? <p className="pill good">{message}</p> : null}
-              {error ? <p className="pill warn">{error}</p> : null}
-            </div>
-
-            <p className="muted">The photos attach to the job card immediately after the upload completes.</p>
           </div>
         </div>
-      </div>
     </div>
   );
 }
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<UploadLanding />} />
-      <Route path="/upload/:token" element={<UploadPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route path="/" element={<UploadLanding />} />
+        <Route path="/upload/:token" element={<UploadPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

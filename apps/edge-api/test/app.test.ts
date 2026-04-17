@@ -7,15 +7,24 @@ import {
 } from "../../../packages/shared/src/ai-test-studio";
 import { createApp } from "../src/app.js";
 import { signHmacSha256 } from "../src/crypto.js";
-import type { EdgeApiEnv } from "../src/env.js";
+import { getConfig, type EdgeApiEnv } from "../src/env.js";
 import {
   HttpAiTestJudgeProvider,
   HttpAiTestRunnerProvider,
   MockAiTestJudgeProvider,
   MockAiTestRunnerProvider,
 } from "../src/providers/ai-test-studio.js";
+import {
+  createMockMicrosoftAccessToken,
+  defaultMockMicrosoftIdentity,
+  MockMicrosoftCalendarAdapter,
+} from "../src/providers/calendar.js";
+import { MockMessagingProvider } from "../src/providers/messaging.js";
+import { MockRealtimeVoiceProvider } from "../src/providers/realtime.js";
 import { HeuristicReasoningProvider, HttpReasoningProvider } from "../src/providers/reasoning.js";
+import { HeuristicVoiceCloneProvider } from "../src/providers/voice-clone.js";
 import { AiTestStudioService } from "../src/ai-test-studio-service.js";
+import { OnboardingService } from "../src/onboarding-service.js";
 import { InMemoryOnboardingRepository } from "../src/storage/memory.js";
 import { InMemoryObjectStore } from "../src/storage/artifacts.js";
 
@@ -110,6 +119,30 @@ async function automationHeadersForRawBody(secret: string, path: string, rawBody
   };
 }
 
+async function withMockProviderFetch<T>(app: ReturnType<typeof createApp>, run: () => Promise<T>): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/mock/providers/")) {
+      const body =
+        request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+      return app.request(`${url.pathname}${url.search}`, {
+        method: request.method,
+        headers: request.headers,
+        body,
+      });
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 test("worker onboarding flow reaches finalized state", async () => {
   const repo = new InMemoryOnboardingRepository();
   const objectStore = new InMemoryObjectStore();
@@ -151,10 +184,14 @@ test("worker onboarding flow reaches finalized state", async () => {
   const onboardingCookie = startResponse.headers.get("set-cookie");
   assert.match(onboardingCookie ?? "", /curve_onboarding_session=/);
   const startBody = (await startResponse.json()) as {
-    session: { id: string };
+    session: { id: string; nextQuestion?: { question?: string } | null };
   };
   const sessionId = startBody.session.id;
   assert.equal("participantToken" in startBody.session, false);
+  assert.equal(
+    startBody.session.nextQuestion?.question,
+    "What kinds of jobs do you want the agent to talk about and qualify?",
+  );
 
   const duplicateStartResponse = await app.request("/onboarding/sessions/start", {
     method: "POST",
@@ -175,6 +212,21 @@ test("worker onboarding flow reaches finalized state", async () => {
     },
   });
   assert.equal(resumedResponse.status, 200);
+
+  const nextQuestionResponse = await app.request(`/onboarding/sessions/${sessionId}/next-question`, {
+    method: "POST",
+    headers: {
+      Cookie: onboardingCookie ?? "",
+    },
+  });
+  assert.equal(nextQuestionResponse.status, 200);
+  const nextQuestionBody = (await nextQuestionResponse.json()) as {
+    nextQuestion?: { question?: string } | null;
+  };
+  assert.equal(
+    nextQuestionBody.nextQuestion?.question,
+    "What kinds of jobs do you want the agent to talk about and qualify?",
+  );
 
   const turnResponse = await app.request(`/onboarding/sessions/${sessionId}/turns`, {
     method: "POST",
@@ -219,10 +271,15 @@ test("worker onboarding flow reaches finalized state", async () => {
   };
   assert.ok(calendarBody.calendar.authUrl);
   assert.ok(calendarBody.calendar.authState);
+  assert.match(calendarBody.calendar.authUrl ?? "", /\/mock\/providers\/microsoft\/authorize/);
 
-  const callbackResponse = await app.request(
-    `/onboarding/calendar/microsoft/callback?state=${encodeURIComponent(calendarBody.calendar.authState ?? "")}&code=mock-code&email=jordan@example.com&calendar=Jordan%20Calendar`,
-  );
+  const mockAuthorizeUrl = new URL(calendarBody.calendar.authUrl ?? "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft/authorize");
+  const authorizeResponse = await app.request(`${mockAuthorizeUrl.pathname}${mockAuthorizeUrl.search}`);
+  assert.equal(authorizeResponse.status, 302);
+  const callbackLocation = authorizeResponse.headers.get("location");
+  assert.ok(callbackLocation);
+  const callbackUrl = new URL(callbackLocation ?? "https://curve-ai-api-staging.workers.dev/onboarding/calendar/microsoft/callback");
+  const callbackResponse = await app.request(`${callbackUrl.pathname}${callbackUrl.search}`);
   assert.equal(callbackResponse.status, 302);
 
   const formData = new FormData();
@@ -283,11 +340,371 @@ test("worker onboarding flow reaches finalized state", async () => {
   assert.equal(duplicateFinalize.status, 403);
 });
 
+test("onboarding start rolls invite state back when realtime provisioning fails", async () => {
+  const repo = new InMemoryOnboardingRepository();
+  const app = createApp({
+    env: baseEnv(),
+    repo,
+    objectStore: new InMemoryObjectStore(),
+    providers: {
+      realtimeVoice: {
+        mode: "configured",
+        async issueBrowserSession() {
+          throw new Error("Realtime provider unavailable");
+        },
+      },
+      reasoning: new HeuristicReasoningProvider(),
+      calendar: new MockMicrosoftCalendarAdapter(),
+      voiceClone: new HeuristicVoiceCloneProvider(),
+      messaging: new MockMessagingProvider(),
+    },
+  });
+
+  const inviteResponse = await app.request("/onboarding/invites", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      fullName: "Rollback Test",
+      email: "rollback@example.com",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as { invite: { code: string } };
+
+  const firstStartResponse = await app.request("/onboarding/sessions/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    }),
+  });
+  assert.equal(firstStartResponse.status, 500);
+
+  const invite = await repo.getInviteByCode(inviteBody.invite.code);
+  assert.equal(invite?.status, "pending");
+  assert.equal(invite?.sessionId, undefined);
+
+  const secondStartResponse = await app.request("/onboarding/sessions/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    }),
+  });
+  assert.equal(secondStartResponse.status, 500);
+});
+
+test("onboarding finalize keeps the session mutable if downstream persistence fails", async () => {
+  class FailingFinalizeRepo extends InMemoryOnboardingRepository {
+    private upsertCalls = 0;
+
+    override async upsertStaffProfile(
+      input: Parameters<InMemoryOnboardingRepository["upsertStaffProfile"]>[0],
+    ): Promise<void> {
+      this.upsertCalls += 1;
+      if (this.upsertCalls >= 2) {
+        throw new Error("Profile write failed");
+      }
+      await super.upsertStaffProfile(input);
+    }
+  }
+
+  const repo = new FailingFinalizeRepo();
+  const app = createApp({
+    env: baseEnv(),
+    repo,
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  const inviteResponse = await app.request("/onboarding/invites", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      fullName: "Finalize Retry",
+      role: "Owner",
+      email: "finalize@example.com",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as { invite: { code: string } };
+
+  const startResponse = await app.request("/onboarding/sessions/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    }),
+  });
+  assert.equal(startResponse.status, 201);
+  const onboardingCookie = startResponse.headers.get("set-cookie") ?? "";
+  const startBody = (await startResponse.json()) as { session: { id: string } };
+  const sessionId = startBody.session.id;
+
+  const calendarResponse = await app.request(`/onboarding/sessions/${sessionId}/calendar/microsoft/start`, {
+    headers: {
+      Cookie: onboardingCookie,
+    },
+  });
+  assert.equal(calendarResponse.status, 200);
+  const calendarBody = (await calendarResponse.json()) as { calendar: { authState?: string } };
+  assert.ok(calendarBody.calendar.authState);
+
+  const callbackResponse = await app.request(
+    `/onboarding/calendar/microsoft/callback?state=${encodeURIComponent(calendarBody.calendar.authState ?? "")}&email=finalize@example.com&calendar=Primary`,
+  );
+  assert.equal(callbackResponse.status, 302);
+
+  const formData = new FormData();
+  formData.set("sampleLabel", "Quiet office sample");
+  formData.set("durationSeconds", "25");
+  formData.set("sample", new File(["voice-data"], "voice-sample.webm", { type: "audio/webm" }));
+  const voiceSampleResponse = await app.request(`/onboarding/sessions/${sessionId}/voice-sample`, {
+    method: "POST",
+    headers: {
+      Cookie: onboardingCookie,
+    },
+    body: formData,
+  });
+  assert.equal(voiceSampleResponse.status, 200);
+
+  const finalizeResponse = await app.request(`/onboarding/sessions/${sessionId}/finalize`, {
+    method: "POST",
+    headers: {
+      Cookie: onboardingCookie,
+    },
+  });
+  assert.equal(finalizeResponse.status, 500);
+
+  const resumedResponse = await app.request(`/onboarding/sessions/${sessionId}`, {
+    headers: {
+      Cookie: onboardingCookie,
+    },
+  });
+  assert.equal(resumedResponse.status, 200);
+  const resumedBody = (await resumedResponse.json()) as { session: { status: string } };
+  assert.notEqual(resumedBody.session.status, "completed");
+});
+
+test("configured mock provider endpoints exercise realtime and calendar integrations", async () => {
+  const app = createApp({
+    env: baseEnv({
+      ELEVENLABS_API_KEY: "test-elevenlabs-key",
+      ELEVENLABS_AGENT_ID: "agent_mock_123",
+      ELEVENLABS_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/elevenlabs",
+      MICROSOFT_CLIENT_ID: "mock-client-id",
+      MICROSOFT_CLIENT_SECRET: "mock-client-secret",
+      MICROSOFT_REDIRECT_URI: "https://curve-ai-api-staging.workers.dev/onboarding/calendar/microsoft/callback",
+      MICROSOFT_AUTH_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft",
+      MICROSOFT_GRAPH_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft",
+    }),
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  await withMockProviderFetch(app, async () => {
+    const inviteResponse = await app.request("/onboarding/invites", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({
+        fullName: "Jordan S",
+        role: "Owner",
+      }),
+    });
+    assert.equal(inviteResponse.status, 201);
+    const inviteBody = (await inviteResponse.json()) as {
+      invite: { code: string };
+    };
+
+    const startResponse = await app.request("/onboarding/sessions/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inviteCode: inviteBody.invite.code,
+        consentAccepted: true,
+        cloneConsentAccepted: true,
+      }),
+    });
+    assert.equal(startResponse.status, 201);
+    const onboardingCookie = startResponse.headers.get("set-cookie");
+    const startBody = (await startResponse.json()) as {
+      session: { id: string; voiceSession?: { mode: string; websocketUrl?: string } };
+    };
+    assert.equal(startBody.session.voiceSession?.mode, "configured");
+    assert.match(startBody.session.voiceSession?.websocketUrl ?? "", /^wss:\/\/mock\.elevenlabs\.local\/convai\/agent_mock_123\?/);
+
+    const calendarStartResponse = await app.request(`/onboarding/sessions/${startBody.session.id}/calendar/microsoft/start`, {
+      headers: {
+        Cookie: onboardingCookie ?? "",
+      },
+    });
+    assert.equal(calendarStartResponse.status, 200);
+    const calendarStartBody = (await calendarStartResponse.json()) as {
+      calendar: { authUrl?: string };
+    };
+    assert.match(calendarStartBody.calendar.authUrl ?? "", /\/mock\/providers\/microsoft\/authorize/);
+
+    const authorizeUrl = new URL(calendarStartBody.calendar.authUrl ?? "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft/authorize");
+    const authorizeResponse = await app.request(`${authorizeUrl.pathname}${authorizeUrl.search}`);
+    assert.equal(authorizeResponse.status, 302);
+    const callbackLocation = authorizeResponse.headers.get("location");
+    assert.ok(callbackLocation);
+
+    const callbackUrl = new URL(callbackLocation ?? "https://curve-ai-api-staging.workers.dev/onboarding/calendar/microsoft/callback");
+    const callbackResponse = await app.request(`${callbackUrl.pathname}${callbackUrl.search}`);
+    assert.equal(callbackResponse.status, 302);
+
+    const sessionResponse = await app.request(`/onboarding/sessions/${startBody.session.id}`, {
+      headers: {
+        Cookie: onboardingCookie ?? "",
+      },
+    });
+    assert.equal(sessionResponse.status, 200);
+    const sessionBody = (await sessionResponse.json()) as {
+      session: {
+        calendar?: { mode: string; status: string; accountEmail?: string; calendarLabel?: string };
+      };
+    };
+    assert.equal(sessionBody.session.calendar?.mode, "configured");
+    assert.equal(sessionBody.session.calendar?.status, "connected");
+    assert.equal(sessionBody.session.calendar?.accountEmail, "jordan.s@example.com");
+    assert.equal(sessionBody.session.calendar?.calendarLabel, "Jordan S Calendar");
+  });
+});
+
+test("configured mock provider endpoints exercise appointment booking and photo-link SMS delivery", async () => {
+  const app = createApp({
+    env: baseEnv({
+      MICROSOFT_CLIENT_ID: "mock-client-id",
+      MICROSOFT_CLIENT_SECRET: "mock-client-secret",
+      MICROSOFT_REDIRECT_URI: "https://curve-ai-api-staging.workers.dev/onboarding/calendar/microsoft/callback",
+      MICROSOFT_AUTH_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft",
+      MICROSOFT_GRAPH_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft",
+      TWILIO_ACCOUNT_SID: "AC123456789",
+      TWILIO_AUTH_TOKEN: "twilio-auth-token",
+      TWILIO_FROM_NUMBER: "+61400000000",
+      TWILIO_BASE_URL: "https://curve-ai-api-staging.workers.dev/mock/providers/twilio",
+    }),
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  await withMockProviderFetch(app, async () => {
+    const staff = await createStaffSession(app, {
+      fullName: "Jordan Tradie",
+      email: "jordan@example.com",
+      phoneNumber: "+61422222222",
+      role: "Owner",
+      timezone: "Australia/Sydney",
+    });
+
+    const calendarStartResponse = await app.request(`/staff/calendar/microsoft/start?staffId=${staff.staffId}`, {
+      headers: {
+        Cookie: staff.sessionCookie,
+      },
+    });
+    assert.equal(calendarStartResponse.status, 302);
+    const authLocation = calendarStartResponse.headers.get("location");
+    assert.match(authLocation ?? "", /\/mock\/providers\/microsoft\/authorize/);
+
+    const authUrl = new URL(authLocation ?? "https://curve-ai-api-staging.workers.dev/mock/providers/microsoft/authorize");
+    const authorizeResponse = await app.request(`${authUrl.pathname}${authUrl.search}`, {
+      headers: {
+        Cookie: staff.sessionCookie,
+      },
+    });
+    assert.equal(authorizeResponse.status, 302);
+    const callbackLocation = authorizeResponse.headers.get("location");
+    assert.match(callbackLocation ?? "", /\/staff\/calendar\/microsoft\/callback/);
+
+    const callbackUrl = new URL(callbackLocation ?? "https://curve-ai-api-staging.workers.dev/staff/calendar/microsoft/callback");
+    const callbackResponse = await app.request(`${callbackUrl.pathname}${callbackUrl.search}`, {
+      headers: {
+        Cookie: staff.sessionCookie,
+      },
+    });
+    assert.equal(callbackResponse.status, 302);
+
+    const statusResponse = await app.request(`/staff/calendar/status?staffId=${staff.staffId}`, {
+      headers: {
+        Cookie: staff.sessionCookie,
+      },
+    });
+    assert.equal(statusResponse.status, 200);
+    const statusBody = (await statusResponse.json()) as {
+      calendarConnection?: { status?: string; accountEmail?: string };
+    };
+    assert.equal(statusBody.calendarConnection?.status, "connected");
+    assert.equal(statusBody.calendarConnection?.accountEmail, "jordan.tradie@example.com");
+
+    const appointmentBody = {
+      staffId: staff.staffId,
+      callerPhone: "+61411111111",
+      notes: "Customer asked for a site visit tomorrow morning.",
+      startAt: "2026-04-17T09:00:00",
+      endAt: "2026-04-17T10:00:00",
+      timezone: "Australia/Sydney",
+      location: "14 Clarence Street, Marrickville",
+    };
+    const appointmentResponse = await app.request("/voice/tools/appointment", {
+      method: "POST",
+      headers: await automationHeaders("automation-secret", "/voice/tools/appointment", appointmentBody),
+      body: JSON.stringify(appointmentBody),
+    });
+    assert.equal(appointmentResponse.status, 200);
+    const appointmentPayload = (await appointmentResponse.json()) as {
+      appointment: { status: string; outlookEventId?: string };
+      calendarSync?: { mode: string; status: string; eventId?: string };
+    };
+    assert.equal(appointmentPayload.appointment.status, "booked");
+    assert.equal(appointmentPayload.calendarSync?.mode, "configured");
+    assert.equal(appointmentPayload.calendarSync?.status, "booked");
+    assert.ok(appointmentPayload.calendarSync?.eventId);
+    assert.equal(appointmentPayload.appointment.outlookEventId, appointmentPayload.calendarSync?.eventId);
+
+    const photoLinkBody = {
+      staffId: staff.staffId,
+      callerPhone: "+61411111111",
+      notes: "Please send a wide shot of the meter box and a close-up of the fault.",
+    };
+    const photoLinkResponse = await app.request("/voice/tools/send-photo-link", {
+      method: "POST",
+      headers: await automationHeaders("automation-secret", "/voice/tools/send-photo-link", photoLinkBody),
+      body: JSON.stringify(photoLinkBody),
+    });
+    assert.equal(photoLinkResponse.status, 200);
+    const photoLinkPayload = (await photoLinkResponse.json()) as {
+      uploadRequest: { uploadLink: string };
+      delivery: { provider: string; mode: string; status: string; messageId?: string; to?: string };
+    };
+    assert.match(photoLinkPayload.uploadRequest.uploadLink, /^https:\/\/curve-ai-upload\.pages\.dev\/upload\//);
+    assert.equal(photoLinkPayload.delivery.provider, "twilio-sms");
+    assert.equal(photoLinkPayload.delivery.mode, "configured");
+    assert.equal(photoLinkPayload.delivery.status, "queued");
+    assert.ok(photoLinkPayload.delivery.messageId);
+    assert.equal(photoLinkPayload.delivery.to, "+61411111111");
+  });
+});
+
 test("health reports worker runtime and provider modes", async () => {
   const app = createTestApp();
 
   const response = await app.request("/health");
   assert.equal(response.status, 200);
+  assert.match(response.headers.get("x-request-id") ?? "", /^req_/);
   const body = (await response.json()) as {
     ok: boolean;
     ready: boolean;
@@ -295,7 +712,9 @@ test("health reports worker runtime and provider modes", async () => {
     realtimeVoice: string;
     reasoning: string;
     calendar: string;
-    warnings: string[];
+    messaging: string;
+    blockingIssues: string[];
+    advisoryIssues: string[];
   };
   assert.equal(body.ok, true);
   assert.equal(body.ready, true);
@@ -303,7 +722,9 @@ test("health reports worker runtime and provider modes", async () => {
   assert.equal(body.realtimeVoice, "mock");
   assert.equal(body.reasoning, "mock");
   assert.equal(body.calendar, "mock");
-  assert.deepEqual(body.warnings, []);
+  assert.equal(body.messaging, "mock");
+  assert.deepEqual(body.blockingIssues, []);
+  assert.deepEqual(body.advisoryIssues, []);
 });
 
 test("public health omits provider modes and warning details", async () => {
@@ -318,7 +739,100 @@ test("public health omits provider modes and warning details", async () => {
   assert.equal("realtimeVoice" in body, false);
   assert.equal("reasoning" in body, false);
   assert.equal("calendar" in body, false);
-  assert.equal("warnings" in body, false);
+  assert.equal("blockingIssues" in body, false);
+  assert.equal("advisoryIssues" in body, false);
+});
+
+test("config resolves openai-compatible reasoning from OPENAI_API_KEY without duplicating REASONING_API_KEY", () => {
+  const config = getConfig(
+    baseEnv({
+      OPENAI_API_KEY: "openai-secret",
+      REASONING_PROVIDER: "openai-compatible",
+    }),
+  );
+
+  assert.equal(config.reasoningMode, "openai-compatible");
+});
+
+test("health surfaces advisory provider issues without failing readiness", async () => {
+  const app = createApp({
+    env: baseEnv({
+      ELEVENLABS_API_KEY: "elevenlabs-secret",
+      REASONING_PROVIDER: "openai-compatible",
+      MICROSOFT_CLIENT_ID: "client-only",
+    }),
+    repo: new InMemoryOnboardingRepository(),
+    objectStore: new InMemoryObjectStore(),
+  });
+
+  const response = await app.request("/health");
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as {
+    ok: boolean;
+    ready: boolean;
+    advisoryIssues: string[];
+    blockingIssues: string[];
+  };
+  assert.equal(body.ok, true);
+  assert.equal(body.ready, true);
+  assert.deepEqual(body.blockingIssues, []);
+  assert.ok(body.advisoryIssues.some((issue) => issue.includes("ELEVENLABS_AGENT_ID")));
+  assert.ok(body.advisoryIssues.some((issue) => issue.includes("REASONING_PROVIDER")));
+  assert.ok(body.advisoryIssues.some((issue) => issue.includes("Microsoft calendar credentials")));
+});
+
+test("worker responses include a request id and emit structured completion logs", async () => {
+  const app = createTestApp();
+  const originalInfo = console.info;
+  const lines: string[] = [];
+  console.info = (message?: unknown) => {
+    lines.push(String(message));
+  };
+
+  try {
+    const response = await app.request("/dashboard", {
+      headers: {
+        Authorization: "Bearer admin-secret",
+      },
+    });
+
+    assert.equal(response.status, 200);
+    const requestId = response.headers.get("x-request-id") ?? "";
+    assert.match(requestId, /^req_/);
+
+    const completionLog = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === "request.completed" && entry.path === "/dashboard");
+    assert.ok(completionLog);
+    assert.equal(completionLog?.requestId, requestId);
+    assert.equal(completionLog?.status, 200);
+    assert.equal(completionLog?.routeFamily, "ops");
+    assert.equal(completionLog?.authKind, "admin");
+  } finally {
+    console.info = originalInfo;
+  }
+});
+
+test("request logs redact bearer-like path segments", async () => {
+  const app = createTestApp();
+  const originalWarn = console.warn;
+  const lines: string[] = [];
+  console.warn = (message?: unknown) => {
+    lines.push(String(message));
+  };
+
+  try {
+    const response = await app.request("https://curve-ai-api-staging.workers.dev/uploads/upload_secret_token");
+    assert.equal(response.status, 404);
+
+    const completionLog = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === "request.completed" && entry.routeFamily === "upload");
+    assert.ok(completionLog);
+    assert.equal(completionLog?.path, "/uploads/[token]");
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("non-local requests fail fast when worker config is incomplete", async () => {
@@ -366,6 +880,95 @@ test("public non-local requests do not receive detailed config warnings", async 
     };
   };
   assert.equal(body.error.details, undefined);
+});
+
+test("public upload errors stay correlation-friendly without leaking token details", async () => {
+  const app = createTestApp();
+
+  const response = await app.request("https://curve-ai-api-staging.workers.dev/uploads/upload_secret_token");
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get("x-request-id") ?? "", /^req_/);
+
+  const body = (await response.json()) as {
+    error: {
+      requestId?: string;
+      details?: Record<string, unknown>;
+    };
+  };
+  assert.equal(body.error.details, undefined);
+  assert.equal(body.error.requestId, response.headers.get("x-request-id") ?? undefined);
+});
+
+test("cookie-authenticated staff routes reject non-local requests without an origin", async () => {
+  const app = createTestApp();
+  const staffSession = await createStaffSession(app, {
+    fullName: "Jordan S",
+    email: "jordan@example.com",
+  });
+
+  const response = await app.request("https://curve-ai-api-staging.workers.dev/staff/me", {
+    headers: {
+      Cookie: staffSession.sessionCookie,
+    },
+  });
+  assert.equal(response.status, 403);
+});
+
+test("mock provider routes are not exposed on non-local requests", async () => {
+  const app = createTestApp();
+
+  const response = await app.request("https://curve-ai-api-staging.workers.dev/mock/providers/microsoft/authorize?redirect_uri=https://curve-ai-api-staging.workers.dev/onboarding/calendar/microsoft/callback&state=test");
+  assert.equal(response.status, 404);
+});
+
+test("non-local onboarding calendar start reports an honest unavailable state when Microsoft is not configured", async () => {
+  const app = createTestApp();
+
+  const inviteResponse = await app.request("/onboarding/invites", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      fullName: "Casey Tradie",
+      role: "Owner",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as { invite: { code: string } };
+
+  const startResponse = await app.request("/onboarding/sessions/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inviteCode: inviteBody.invite.code,
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+    }),
+  });
+  assert.equal(startResponse.status, 201);
+  const onboardingCookie = startResponse.headers.get("set-cookie") ?? "";
+  const startBody = (await startResponse.json()) as { session: { id: string } };
+
+  const calendarResponse = await app.request(
+    `https://curve-ai-api-staging.workers.dev/onboarding/sessions/${startBody.session.id}/calendar/microsoft/start`,
+    {
+      headers: {
+        Cookie: onboardingCookie,
+        Origin: "https://curve-ai-onboarding.pages.dev",
+      },
+    },
+  );
+  assert.equal(calendarResponse.status, 200);
+  const calendarBody = (await calendarResponse.json()) as {
+    calendar?: { status?: string; authUrl?: string; lastError?: string };
+    session: { status: string; calendar?: { status?: string; lastError?: string } };
+  };
+  assert.equal(calendarBody.calendar?.status, "error");
+  assert.equal(calendarBody.calendar?.authUrl, undefined);
+  assert.match(calendarBody.calendar?.lastError ?? "", /not configured for this staging environment/i);
+  assert.equal(calendarBody.session.status, "calendar");
+  assert.equal(calendarBody.session.calendar?.status, "error");
 });
 
 test("worker blocks realtime session issuance without both consents", async () => {
@@ -465,11 +1068,19 @@ test("customer upload flow stays on Cloudflare routes and produces protected pho
   });
   assert.equal(uploadResponse.status, 200);
   const uploadBody = (await uploadResponse.json()) as {
-    upload: { status: string; fileCount: number; notes?: string };
+    upload: {
+      status: string;
+      fileCount: number;
+      requestedBy?: string;
+      businessName?: string;
+      jobSummary?: string;
+      requestNote?: string;
+    };
   };
   assert.equal(uploadBody.upload.status, "completed");
   assert.equal(uploadBody.upload.fileCount, 1);
-  assert.equal(uploadBody.upload.notes, undefined);
+  assert.equal(uploadBody.upload.jobSummary, undefined);
+  assert.equal(uploadBody.upload.requestNote, "Send photos of the unit and pressure valve.");
 
   const uploadStatusResponse = await app.request(`/uploads/${linkBody.uploadRequest.token}`);
   assert.equal(uploadStatusResponse.status, 200);
@@ -477,6 +1088,11 @@ test("customer upload flow stays on Cloudflare routes and produces protected pho
     upload: Record<string, unknown>;
   };
   assert.equal(uploadStatusBody.upload.fileCount, 1);
+  assert.equal(uploadStatusBody.upload.jobSummary, undefined);
+  assert.equal(
+    uploadStatusBody.upload.requestNote,
+    "Send photos of the unit and pressure valve.",
+  );
   assert.equal("jobId" in uploadStatusBody.upload, false);
   assert.equal("staffId" in uploadStatusBody.upload, false);
   assert.equal("callerPhone" in uploadStatusBody.upload, false);
@@ -509,6 +1125,157 @@ test("customer upload flow stays on Cloudflare routes and produces protected pho
   assert.equal(photoResponse.status, 200);
   assert.equal(photoResponse.headers.get("content-type"), "image/jpeg");
   assert.equal(photoResponse.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("customer profiles link repeat callers across jobs, calls, and uploads", async () => {
+  const app = createTestApp();
+  const staff = await createStaffSession(app, {
+    fullName: "Jordan Tradie",
+    email: "jordan@example.com",
+    phoneNumber: "+61422222222",
+    role: "Owner",
+    timezone: "Australia/Sydney",
+  });
+
+  const firstContextBody = {
+    staffId: staff.staffId,
+    callerPhone: "0400 000 111",
+    callerName: "Mia",
+    address: "14 Clarence Street",
+    suburb: "Marrickville",
+    issue: "Blocked stormwater drain",
+  };
+  const firstContextResponse = await app.request("/voice/context", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/context", firstContextBody),
+    body: JSON.stringify(firstContextBody),
+  });
+  assert.equal(firstContextResponse.status, 200);
+  const firstContext = (await firstContextResponse.json()) as {
+    job: { id: string; callerId?: string };
+    customer?: { id: string; totalJobs: number };
+  };
+  assert.ok(firstContext.job.id);
+  assert.ok(firstContext.customer?.id);
+  assert.equal(firstContext.customer?.totalJobs, 1);
+
+  const secondContextBody = {
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    callerName: "Mia T",
+    address: "14 Clarence Street",
+    suburb: "Marrickville",
+    issue: "Leaking hot water unit",
+  };
+  const secondContextResponse = await app.request("/voice/context", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/context", secondContextBody),
+    body: JSON.stringify(secondContextBody),
+  });
+  assert.equal(secondContextResponse.status, 200);
+  const secondContext = (await secondContextResponse.json()) as {
+    job: { id: string };
+    customer?: { id: string; totalJobs: number };
+  };
+  assert.equal(secondContext.customer?.id, firstContext.customer?.id);
+  assert.equal(secondContext.customer?.totalJobs, 2);
+
+  const postCallBody = {
+    callId: "call_customer_history",
+    jobId: secondContext.job.id,
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    summary: "Caller wants a same-day inspection after sending photos.",
+    status: "completed" as const,
+    direction: "inbound" as const,
+  };
+  const postCallResponse = await app.request("/voice/post-call", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/post-call", postCallBody),
+    body: JSON.stringify(postCallBody),
+  });
+  assert.equal(postCallResponse.status, 201);
+
+  const photoLinkBody = {
+    jobId: firstContext.job.id,
+    staffId: staff.staffId,
+    callerPhone: "+61400000111",
+    notes: "Send wider shots of the drain and close-ups of the outlet.",
+  };
+  const photoLinkResponse = await app.request("/voice/tools/send-photo-link", {
+    method: "POST",
+    headers: await automationHeaders("automation-secret", "/voice/tools/send-photo-link", photoLinkBody),
+    body: JSON.stringify(photoLinkBody),
+  });
+  assert.equal(photoLinkResponse.status, 200);
+  const photoLink = (await photoLinkResponse.json()) as {
+    uploadRequest: { token: string };
+  };
+
+  const uploadForm = new FormData();
+  uploadForm.append(
+    "photos",
+    new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])], "drain.jpg", {
+      type: "image/jpeg",
+    }),
+  );
+  const uploadResponse = await app.request(`/uploads/${photoLink.uploadRequest.token}/photos`, {
+    method: "POST",
+    body: uploadForm,
+  });
+  assert.equal(uploadResponse.status, 200);
+
+  const firstCardResponse = await app.request(`/jobs/${firstContext.job.id}/card`, {
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(firstCardResponse.status, 200);
+  const firstCard = (await firstCardResponse.json()) as {
+    card: {
+      customer?: {
+        id: string;
+        displayName?: string;
+        totalJobs: number;
+        totalCalls: number;
+        totalUploads: number;
+        totalPhotos: number;
+        knownStaffIds: string[];
+        recentJobs: Array<{ jobId: string }>;
+      };
+    };
+  };
+  assert.equal(firstCard.card.customer?.id, firstContext.customer?.id);
+  assert.equal(firstCard.card.customer?.displayName, "Mia T");
+  assert.equal(firstCard.card.customer?.totalJobs, 2);
+  assert.equal(firstCard.card.customer?.totalCalls, 1);
+  assert.equal(firstCard.card.customer?.totalUploads, 1);
+  assert.equal(firstCard.card.customer?.totalPhotos, 1);
+  assert.deepEqual(firstCard.card.customer?.knownStaffIds, [staff.staffId]);
+  assert.equal(firstCard.card.customer?.recentJobs.length, 2);
+
+  const customerResponse = await app.request(`/customers/${firstContext.customer?.id}`, {
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(customerResponse.status, 200);
+  const customerBody = (await customerResponse.json()) as {
+    customer: {
+      id: string;
+      totalJobs: number;
+      totalCalls: number;
+      totalUploads: number;
+      totalPhotos: number;
+      recentJobs: Array<{ jobId: string }>;
+    };
+  };
+  assert.equal(customerBody.customer.id, firstContext.customer?.id);
+  assert.equal(customerBody.customer.totalJobs, 2);
+  assert.equal(customerBody.customer.totalCalls, 1);
+  assert.equal(customerBody.customer.totalUploads, 1);
+  assert.equal(customerBody.customer.totalPhotos, 1);
+  assert.equal(customerBody.customer.recentJobs.length, 2);
 });
 
 test("protected photo assets only load for the assigned staff session or admin", async () => {
@@ -842,10 +1609,12 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   });
   assert.equal(meResponse.status, 200);
   const meBody = (await meResponse.json()) as {
-    staff: { id: string; voiceConsentStatus: string };
+    staff: { id: string; voiceConsentStatus: string; setup?: { status?: string; currentStep?: string } };
   };
   assert.equal(meBody.staff.id, inviteBody.staff.id);
   assert.equal(meBody.staff.voiceConsentStatus, "pending");
+  assert.equal(meBody.staff.setup?.status, "not_started");
+  assert.equal(meBody.staff.setup?.currentStep, "consent");
 
   const calendarResponse = await app.request("/staff/calendar/connect", {
     method: "POST",
@@ -862,6 +1631,13 @@ test("staff invite verification and staff-scoped job access work on the Worker",
     }),
   });
   assert.equal(calendarResponse.status, 200);
+  const calendarBody = (await calendarResponse.json()) as {
+    calendarConnection: { status?: string; authState?: string; accessToken?: string; refreshToken?: string };
+  };
+  assert.equal(calendarBody.calendarConnection.status, "connected");
+  assert.equal(calendarBody.calendarConnection.authState, undefined);
+  assert.equal(calendarBody.calendarConnection.accessToken, undefined);
+  assert.equal(calendarBody.calendarConnection.refreshToken, undefined);
 
   const consentResponse = await app.request("/staff/voice-consent", {
     method: "POST",
@@ -962,6 +1738,76 @@ test("staff invite verification and staff-scoped job access work on the Worker",
   assert.equal(revokedMeResponse.status, 401);
 });
 
+test("staff setup launch creates or resumes a canonical onboarding session", async () => {
+  const app = createTestApp();
+  const staff = await createStaffSession(app, {
+    fullName: "Jordan Tradie",
+    email: "jordan@example.com",
+    phoneNumber: "+61422222222",
+    role: "Owner",
+    timezone: "Australia/Sydney",
+  });
+
+  const firstLaunchResponse = await app.request("/staff/setup/launch", {
+    method: "POST",
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(firstLaunchResponse.status, 200);
+  const firstOnboardingCookie = firstLaunchResponse.headers.get("set-cookie");
+  assert.match(firstOnboardingCookie ?? "", /curve_onboarding_session=/);
+  const firstLaunchBody = (await firstLaunchResponse.json()) as {
+    launchUrl: string;
+    setup: { status: string; currentStep?: string };
+  };
+  assert.match(firstLaunchBody.launchUrl, /^https:\/\/curve-ai-onboarding\.pages\.dev\/onboard\//);
+  assert.equal(firstLaunchBody.setup.status, "in_progress");
+  assert.equal(firstLaunchBody.setup.currentStep, "consent");
+
+  const firstInviteCode = new URL(firstLaunchBody.launchUrl).pathname.split("/").pop() ?? "";
+  const resumedResponse = await app.request(`/onboarding/invites/${firstInviteCode}/session`, {
+    headers: {
+      Cookie: firstOnboardingCookie ?? "",
+    },
+  });
+  assert.equal(resumedResponse.status, 200);
+  const resumedBody = (await resumedResponse.json()) as {
+    session: { id: string; staffId: string; inviteCode: string; status: string };
+  };
+  assert.equal(resumedBody.session.staffId, staff.staffId);
+  assert.equal(resumedBody.session.inviteCode, firstInviteCode);
+  assert.equal(resumedBody.session.status, "pending");
+
+  const secondLaunchResponse = await app.request("/staff/setup/launch", {
+    method: "POST",
+    headers: {
+      Cookie: staff.sessionCookie,
+    },
+  });
+  assert.equal(secondLaunchResponse.status, 200);
+  const secondOnboardingCookie = secondLaunchResponse.headers.get("set-cookie");
+  const secondLaunchBody = (await secondLaunchResponse.json()) as {
+    launchUrl: string;
+    setup: { status: string; currentStep?: string };
+  };
+  assert.equal(secondLaunchBody.launchUrl, firstLaunchBody.launchUrl);
+  assert.equal(secondLaunchBody.setup.status, "in_progress");
+  assert.equal(secondLaunchBody.setup.currentStep, "consent");
+
+  const secondInviteCode = new URL(secondLaunchBody.launchUrl).pathname.split("/").pop() ?? "";
+  const resumedAgainResponse = await app.request(`/onboarding/invites/${secondInviteCode}/session`, {
+    headers: {
+      Cookie: secondOnboardingCookie ?? "",
+    },
+  });
+  assert.equal(resumedAgainResponse.status, 200);
+  const resumedAgainBody = (await resumedAgainResponse.json()) as {
+    session: { id: string };
+  };
+  assert.equal(resumedAgainBody.session.id, resumedBody.session.id);
+});
+
 test("staff OTP verification rejects non-numeric codes", async () => {
   const app = createTestApp();
 
@@ -997,6 +1843,39 @@ test("staff session routes reject requests from the public onboarding origin", a
   });
 
   assert.equal(response.status, 403);
+});
+
+test("local onboarding preview origins are allowed against the local worker", async () => {
+  const app = createTestApp({
+    PUBLIC_API_URL: "http://127.0.0.1:8790",
+    PUBLIC_ONBOARDING_APP_URL: "http://127.0.0.1:4394",
+    PUBLIC_STAFF_APP_URL: "http://127.0.0.1:4395",
+    PUBLIC_OPS_APP_URL: "http://127.0.0.1:4396",
+    PUBLIC_UPLOAD_APP_URL: "http://127.0.0.1:4397",
+    ALLOWED_ORIGINS: "http://127.0.0.1:4394",
+  });
+
+  const inviteResponse = await app.request("/onboarding/invites", {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({
+      fullName: "Jordan Tradie",
+      email: "jordan@example.com",
+    }),
+  });
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = (await inviteResponse.json()) as {
+    invite: { code: string };
+  };
+
+  const response = await app.request(`/onboarding/invites/${inviteBody.invite.code}/session`, {
+    headers: {
+      Origin: "http://127.0.0.1:4394",
+    },
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:4394");
 });
 
 test("hosted reasoning payload strips onboarding secrets before egress", async () => {
@@ -1205,6 +2084,136 @@ test("hosted reasoning payload strips onboarding secrets before egress", async (
   assert.equal((sanitizedSession.voiceSample as Record<string, unknown>).storedPath, undefined);
 });
 
+test("openai-compatible reasoning uses the Responses API structured output contract", async () => {
+  const fallback = new HeuristicReasoningProvider();
+  let requestBody: Record<string, unknown> | undefined;
+  const provider = new HttpReasoningProvider({
+    baseUrl: "https://api.openai.com/v1/responses",
+    apiKey: "openai-secret",
+    model: "gpt-4.1-mini",
+    mode: "openai-compatible",
+    fallback,
+    fetchImpl: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            analysis: {
+              coverage: [],
+              recommendedQuestions: [],
+              coverageScore: 0.9,
+              interviewerBrief: "Move to confirmation.",
+            },
+            review: {
+              businessSummary: "Sydney plumbing and hot water specialist.",
+              staffProfile: {
+                staffName: "Jordan Tradie",
+                companyName: "Jordan Plumbing",
+                role: "Owner",
+                calendarProvider: "Microsoft",
+              },
+              communicationProfile: {
+                tone: "Direct and friendly",
+                salesStyle: "Consultative",
+                riskTolerance: "Escalate uncertain quotes",
+                customerHandlingRules: ["Confirm scope before quoting."],
+              },
+              pricingProfile: {
+                quotingStyle: "Fixed when clear",
+                calloutPolicy: "Callout fee applies",
+                afterHoursPolicy: "After-hours premium applies",
+                approvalThreshold: "Over $1,000",
+              },
+              businessPractices: {
+                services: ["Plumbing"],
+                serviceAreas: ["Sydney"],
+                operatingHours: "24/7 emergency coverage",
+                exclusions: ["Commercial roofs"],
+                escalationRules: ["Escalate gas leaks"],
+              },
+              crmDiscovery: {
+                currentSystem: "ServiceM8",
+                syncPreference: "Sync",
+                sourceOfTruth: "CRM",
+                notes: ["Calendar is Outlook"],
+              },
+              missingFields: [],
+            },
+          }),
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as typeof fetch,
+  });
+
+  const result = await provider.analyzeSession(
+    {
+      id: "sess_oa",
+      inviteId: "invite_1",
+      inviteCode: "secret-invite-code",
+      staffId: "staff_1",
+      staffName: "Jordan Tradie",
+      participantTokenHash: "hash",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      status: "interviewing",
+      consentAccepted: true,
+      cloneConsentAccepted: true,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:00.000Z",
+      analysis: {
+        coverage: [],
+        recommendedQuestions: [],
+        coverageScore: 0.5,
+        interviewerBrief: "Keep probing pricing.",
+      },
+      review: {
+        businessSummary: "Summary",
+        staffProfile: {
+          staffName: "Jordan Tradie",
+          companyName: "Jordan Plumbing",
+          role: "Owner",
+          calendarProvider: "Microsoft",
+        },
+        communicationProfile: {
+          tone: "Professional",
+          salesStyle: "Consultative",
+          riskTolerance: "Escalate uncertain quotes",
+          customerHandlingRules: ["Confirm scope"],
+        },
+        pricingProfile: {
+          quotingStyle: "Fixed when clear",
+          calloutPolicy: "Callout fee applies",
+          afterHoursPolicy: "After-hours surcharge",
+          approvalThreshold: "Over $1,000",
+        },
+        businessPractices: {
+          services: ["Plumbing"],
+          serviceAreas: ["Sydney"],
+          operatingHours: "24/7",
+          exclusions: ["Commercial roofs"],
+          escalationRules: ["Escalate gas leaks"],
+        },
+        crmDiscovery: {
+          currentSystem: "ServiceM8",
+          syncPreference: "Sync",
+          sourceOfTruth: "CRM",
+          notes: ["Manual import today"],
+        },
+        missingFields: [],
+      },
+    },
+    [{ speaker: "participant", text: "We service Sydney plumbing and hot water jobs." }],
+  );
+
+  assert.equal(result.analysis.coverageScore, 0.9);
+  assert.equal(result.review.staffProfile.companyName, "Jordan Plumbing");
+  assert.equal(requestBody?.model, "gpt-4.1-mini");
+  assert.equal((requestBody?.text as { format?: { type?: string } })?.format?.type, "json_schema");
+});
+
 test("ai test studio strips opaque runner raw payloads before judging and persistence", async () => {
   const repo = new InMemoryOnboardingRepository();
   let judgeRunnerRaw: Record<string, unknown> | undefined;
@@ -1338,9 +2347,11 @@ test("ai test studio can persist cases and execute a passing mock run", async ()
   assert.equal(run.run.status, "completed");
   assert.equal(run.run.judgeResult?.verdict, "pass");
   assert.equal(run.run.runnerResult?.fallbackUsed, false);
+  assert.equal(run.run.runnerResult?.executionMode, "worker-route");
   assert.ok(run.run.runnerResult?.toolCalls.includes("send-photo-link"));
   assert.ok(run.run.runnerResult?.toolCalls.includes("quote"));
   assert.ok(run.run.runnerResult?.toolCalls.includes("end_call"));
+  assert.ok((run.run.runnerResult?.observedEffects?.length ?? 0) > 0);
 
   const getRunResponse = await app.request(`/ai-test-studio/runs/${run.run.id}`, {
     headers: {
@@ -1420,4 +2431,108 @@ test("ai test studio falls back to mock providers when hosted providers fail", a
   assert.equal(run.run.status, "completed");
   assert.equal(run.run.runnerResult?.fallbackUsed, true);
   assert.equal(run.run.judgeResult?.fallbackUsed, true);
+});
+
+test("openai-compatible ai test runner and judge use the Responses API structured output contract", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    requests.push(body);
+    const schemaName = ((body.text as { format?: { name?: string } })?.format?.name ?? "") as string;
+    const payload =
+      schemaName === "curve_ai_test_runner"
+        ? {
+            output_text: JSON.stringify({
+              outputText: "I can send a secure photo upload link and end the call cleanly.",
+              toolCalls: ["send-photo-link", "end_call"],
+            }),
+          }
+        : {
+            output_text: JSON.stringify({
+              verdict: "pass",
+              score: 1,
+              summary: "All required criteria were met.",
+              matchedCriteria: ["Mentions photo flow", "Mentions clean ending"],
+              missedCriteria: [],
+            }),
+          };
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const runner = new HttpAiTestRunnerProvider({
+    baseUrl: "https://api.openai.com/v1/responses",
+    apiKey: "openai-secret",
+    model: "gpt-4.1-mini",
+    mode: "openai-compatible",
+    fallback: new MockAiTestRunnerProvider(),
+    fetchImpl,
+  });
+  const judge = new HttpAiTestJudgeProvider({
+    baseUrl: "https://api.openai.com/v1/responses",
+    apiKey: "openai-secret",
+    model: "gpt-4.1-mini",
+    mode: "openai-compatible",
+    fallback: new MockAiTestJudgeProvider(),
+    fetchImpl,
+  });
+
+  const testCase = {
+    id: "case_1",
+    slug: "photo-flow",
+    name: "Photo flow",
+    status: "active",
+    target: "voice-agent",
+    userPrompt: "The caller needs to upload photos and asks whether the call can end cleanly.",
+    tags: [],
+    successCriteria: [
+      {
+        id: "criterion_1",
+        label: "Mentions photo flow",
+        kind: "response_contains",
+        value: "photo upload link",
+        required: true,
+      },
+      {
+        id: "criterion_2",
+        label: "Mentions clean ending",
+        kind: "response_contains",
+        value: "end the call cleanly",
+        required: true,
+      },
+    ],
+    createdAt: "2026-04-16T00:00:00.000Z",
+    updatedAt: "2026-04-16T00:00:00.000Z",
+  } as const;
+
+  const runnerResult = await runner.runCase({
+    testCase,
+    operatorNotes: "Keep it brief.",
+  });
+  const judgeResult = await judge.judgeRun({
+    testCase,
+    run: {
+      id: "run_1",
+      caseId: testCase.id,
+      status: "running",
+      promptSnapshot: {
+        target: testCase.target,
+        userPrompt: testCase.userPrompt,
+      },
+      criteriaSnapshot: testCase.successCriteria,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      startedAt: "2026-04-16T00:00:00.000Z",
+    },
+    runnerResult,
+  });
+
+  assert.equal(runnerResult.provider, "openai-responses");
+  assert.deepEqual(runnerResult.toolCalls, ["send-photo-link", "end_call"]);
+  assert.equal(judgeResult.provider, "openai-responses");
+  assert.equal(judgeResult.verdict, "pass");
+  assert.equal(requests.length, 2);
+  assert.equal((requests[0]?.text as { format?: { type?: string } })?.format?.type, "json_schema");
+  assert.equal((requests[1]?.text as { format?: { name?: string } })?.format?.name, "curve_ai_test_judge");
 });
